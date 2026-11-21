@@ -14,7 +14,7 @@ void drawFace(bool closed)
   int leftEyeX = centerX - 60;
   int rightEyeX = centerX + 60;
 
-  int eyeHeight = closed ? 53 : 55;
+  int eyeHeight = closed ? 5 : 55;
 
   // Left eye
   M5.Display.fillRoundRect(
@@ -23,7 +23,7 @@ void drawFace(bool closed)
       40,
       eyeHeight,
       18,
-      TFT_CYAN);
+      TFT_WHITE);
 
   // Right eye
   M5.Display.fillRoundRect(
@@ -32,7 +32,7 @@ void drawFace(bool closed)
       40,
       eyeHeight,
       18,
-      TFT_CYAN);
+      TFT_WHITE);
 
   // Mouth
   M5.Display.fillRoundRect(
@@ -41,7 +41,7 @@ void drawFace(bool closed)
       36,
       12,
       6,
-      TFT_CYAN);
+      TFT_WHITE);
 }
 
 void setup()
