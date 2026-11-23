@@ -17,7 +17,8 @@ This template is not an active task.
 - Existing local edits to preserve: <Paths, or none.>
 - In scope: <One specific outcome.>
 - Out of scope: <Only boundaries needed to prevent scope drift.>
-- Estimated total added and deleted lines: <Code, tests, and documentation.>
+- Scope assessment: <Outcomes, complexity, dependencies, and validation needs.
+  If large, flag the scope and recommend a more contained outcome.>
 
 ## Requirements and decisions
 
