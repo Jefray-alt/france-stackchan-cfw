@@ -19,8 +19,6 @@ This template is not an active task.
 - Out of scope: <Only boundaries needed to prevent scope drift.>
 - Scope assessment: <Outcomes, complexity, dependencies, and validation needs.
   If large, flag the scope and recommend a more contained outcome.>
-- Optional rough line estimate: <Added and deleted lines across code, tests,
-  and documentation; a planning hint with no accuracy requirement or limit.>
 
 ## Requirements and decisions
 
