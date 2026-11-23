@@ -1,6 +1,6 @@
 # CoreS3 audio record and replay
 
-**Status:** In progress; implementation approved on 2026-11-23.
+**Status:** Implementation complete; CoreS3 validation pending.
 
 **Outcome:** Tap the awake CoreS3 to record a two-second clip with its built-in
 microphone, hear it automatically through its speaker, and return to idle while
@@ -18,8 +18,8 @@ the face continues updating.
   integration, error recovery, native decision tests, and device instructions.
 - Out of scope: speech recognition, AI, networking, saved recordings, streaming,
   simultaneous capture/playback, volume UI, and external audio hardware.
-- Estimated total added and deleted lines: 700–950 across code, tests, and docs,
-  including this plan. Reassess scope if the estimate exceeds 1,000.
+- Revised total estimate: 950–980 added and deleted lines across both tasks,
+  tests, and docs; concise documentation preserves the approved scope.
 
 ## Requirements and decisions
 
@@ -90,7 +90,7 @@ Neither listed PlatformIO command uploads firmware.
 
 **Proposed commit:** `feat(audio): add bounded cores3 recording and playback`
 
-**Status and evidence:** Complete; independent review round 1 PASS.
+**Status and evidence:** Complete in `7dae9cd`; independent review PASS.
 
 - Owned files: `include/RobotAudio.h`, `src/RobotAudio.cpp`, and this T1 evidence.
   Baseline remains `27315b3` on `feat/audio-record-replay`; the approved untracked
@@ -104,30 +104,21 @@ Neither listed PlatformIO command uploads firmware.
   boundary: the existing native build excludes M5Unified and the transport.
   A mock that restated these calls would not establish I2S/task ownership or sound.
   Meaningful decision RED/GREEN belongs to T2's native state-machine tests.
-- Resolved M5Unified `0.3.0`, `src/utility/Mic_Class.inl:788–801` publishes a
-  completed capture with a release-store only after filling all elements;
-  `:1234–1334` returns whether a request was queued and may wait if both slots
-  are occupied. This transport starts from empty queues and submits once.
-  `:1142–1222` synchronously joins capture before clearing pending requests.
-- `Speaker_Class.inl:739–819` releases the source and clears the channel before
-  final I2S output drains. `:193–235` configures DMA frame length/count;
-  `:565` allocates a mixer block of `dma_buf_len` 32-bit words. After queue
-  emptiness the transport polls an unsigned elapsed drain allowance of
+- M5Unified `0.3.0`, `Mic_Class.inl:788–801` publishes completion only after
+  filling all elements; `:1234–1334` returns queue acceptance. The transport
+  submits once from empty queues. `:1142–1222` joins before clearing requests.
+- `Speaker_Class.inl:739–819` clears the source before final I2S output drains.
+  Using its DMA configuration (`:193–235`) and mixer block (`:565`), poll
   `ceil(2 * (dma_buf_count + 1) * dma_buf_len * 1000 / sample_rate)` ms,
-  conservatively allowing two 16-bit samples per word for the DMA plus mixer.
-  Default CoreS3 output is 48 kHz, 8 buffers of 256 frames: 96 ms. This is a
-  capacity-based allowance, not an audible-completion API or scheduling guarantee;
-  complete clip tails still require device observation. It does not wait out the
-  clip duration in an update loop.
-- `Speaker_Class.inl:1156–1211` joins its task before clearing buffer pointers;
-  `:1214–1237` only queues stop markers. Cleanup therefore uses `end()`, never
-  treats `stop()` or queue emptiness alone as permission to overwrite the buffer,
-  and invalidates clip status only after cleanup returns. No application heap
-  allocation, task, wait loop, or delay was added. Library begin/end still allocate
-  and release I2S resources/tasks; lifecycle locks/joins have no overall deadline
-  and speaker I2S writes can use `portMAX_DELAY`. A T2 watchdog can request cleanup
-  but cannot preempt a stuck library call. Switch/cleanup latency and recovery
-  remain explicit hardware validation gaps.
+  allowing two 16-bit samples per word for DMA plus mixer. Defaults are 48 kHz,
+  8 buffers of 256 frames: 96 ms. This capacity allowance cannot guarantee
+  audible completion or scheduling; full clip tails require device observation.
+- `Speaker_Class.inl:1156–1211` joins before clearing buffer pointers, while
+  `:1214–1237` only queues stop markers. Cleanup uses `end()` before invalidating
+  the clip; neither `stop()` nor queue emptiness permits buffer overwrite.
+  No application allocation, task, wait loop, or delay was added. Library
+  begin/end allocate resources and may wait indefinitely on locks/joins/I2S.
+  T2's watchdog cannot preempt those calls; switching/recovery remain unverified.
 - Validation: `/Users/france/.platformio/penv/bin/pio run -e m5stack-cores3`
   exited 0; RAM 27,708/327,680 and flash 514,575/6,553,600 bytes, unchanged
   because T1 adds no transport instance or call. Integration memory is a T2
@@ -177,7 +168,45 @@ Record firmware revision, resolved dependencies, observations, and any gaps.
 
 **Proposed commit:** `feat(audio): connect touch recording to automatic replay`
 
-**Status and evidence:** Pending.
+**Status and evidence:** Complete; independent review rounds 1 and 2 PASS.
+
+- T2 baseline: clean `feat/audio-record-replay` at `7dae9cd`; T1 is the committed
+  dependency. Approval and all accepted requirements remain unchanged.
+- Owned edits: controller/state-machine headers and sources, native tests and
+  instructions, README, this plan, brief/backlog/roadmap status. No main, renderer,
+  transport, dependency, or native source-selection change was needed.
+- The controller polls audio and face every loop, queues capture/playback once
+  on transitions, handles rejected starts immediately, and logs failure before
+  stop clears the driver error. Startup/idle stop audio and invalidate clips.
+  Only idle sleeps; wake returns idle. Removed unused public setters to prevent
+  state/audio desynchronization. begin(now) resets idle with current uptime.
+- Five-second unsigned watchdogs cover capture and playback; THINKING queues
+  playback without an artificial delay, and entering SPEAKING preserves that
+  deadline. Failure/timeout wins over completion exactly at five seconds.
+- RED: `/Users/france/.platformio/penv/bin/pio test -e native` exited 1 before
+  production edits. `test_busy_presses_do_not_cycle_or_queue` asserted false for
+  the second busy press but received true from the old manual cycle. Unity had
+  14 passes and one failure; the runner additionally reported SIGHUP.
+- GREEN: the same native command exited 0, 12/12 tests. Parameterized cases cover
+  each active phase, retries, busy/completion races, repeated facts, ten healthy
+  cycles, watchdog and idle boundaries/rollover, and repeated sleep/wake.
+- `/Users/france/.platformio/penv/bin/pio run -e m5stack-cores3` exited 0:
+  RAM 91,772/327,680 and flash 542,079/6,553,600 bytes. Espressif32 `8.0.0`,
+  Arduino `3.3.12`, M5Unified `0.3.0`; incremental compile emitted no warnings.
+- Native tests establish decisions and transition signals, not actual driver
+  requests, face/Serial notifications, touch detection, or sound. Source review
+  checks their wiring; all listed physical checks and uploads remain unperformed.
+- `git diff --check` and the relative documentation path/command check exited 0
+  (28 links). Initial reviewed diff from `27315b3`: 888 added/deleted lines.
+- Independent T2 review: fresh `code_reviewer`, `gpt-6.1-sol`/`xhigh`, round 1/3
+  PASS. It inspected transition routing and recovery, reran both PlatformIO
+  checks and documentation/whitespace checks, and confirmed the frozen hashes.
+  Developer selection was also `gpt-6.1-sol`/`xhigh` for coupled timing/state work.
+- Documentation correction from clean `47a6775`: README verification now points
+  to this audio checklist instead of the older manual-cycle workflow checklist.
+  Link/gesture consistency and `git diff --check` passed (exit 0). No firmware or
+  native retest was needed for these two documentation files. The same reviewer
+  passed round 2/3 after checking 14 links, gestures, commands, and whitespace.
 
 ## Review and validation
 
@@ -198,13 +227,15 @@ Record firmware revision, resolved dependencies, observations, and any gaps.
   Two existing M5GFX unused-variable warnings appeared; no project-source errors.
   `git diff --check` passed; the new plan's whitespace and existing ownership
   paths were checked separately. Only this untracked plan was added.
-- T1 build/native checks and independent review passed; T2 remains pending.
+- T1 passed review round 1. T2 passed round 1 for implementation and round 2
+  for its README checklist correction; build/native results remain unchanged.
 - Hardware: no device checks or uploads performed. The pre-existing controller
   refactor's device regression gap remains until relevant checks are observed.
 
 ## Handoff
 
 - Plan approved; implementation routed through the configured implementer.
-- Commit T1 after its checks and independent PASS, then implement/review/commit
-  T2 separately. Update this file with task-to-commit mapping and evidence.
+- T1: `7dae9cd`, `feat(audio): add bounded cores3 recording and playback`.
+- T2: `feat(audio): connect touch recording to automatic replay`, committed
+  separately after its checks and independent PASS.
 - No push authorized. Report any hardware checks still outstanding explicitly.

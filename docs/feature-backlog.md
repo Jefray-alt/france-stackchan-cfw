@@ -22,21 +22,21 @@ the refactored firmware remain pending.
 
 | Original priority | Capability | Status and next evidence |
 |---|---|---|
-| 5 | Reproducible regression checks | 15 native Unity controller tests pass; see the [controller test plan](plan/controller-unit-tests.md). Repeat physical touch/display/Serial/sleep/wake/blink checks after the refactor. Renderer/blink logic has no automated coverage. |
+| 5 | Reproducible regression checks | 12 current native tests cover the audio interaction and timing; see the [audio plan](plan/audio-record-replay.md). Physical audio/touch/display/Serial/sleep/wake/blink checks remain pending. |
 
 Keep detailed acceptance criteria and any confirmed defects in the active task
-plan. No new implementation feature is selected.
+plan. The selected local two-second record/replay interaction is implemented;
+device validation remains pending in the [audio plan](plan/audio-record-replay.md).
 
 ## Later candidates
 
 | Candidate | Decision needed before implementation |
 |---|---|
-| Audio input and output | Choose the interaction, microphone/speaker usage, and buffering requirements. |
 | Speech and AI conversation | Choose local versus remote processing, latency expectations, connectivity, and credential handling. |
 | Servo movement | Confirm connected hardware, pins, power, and mechanical limits. |
 | Persistent preferences | Define which settings survive reboot and how the user changes them. |
 | Dependency version pins | Select known-good versions from a verified build and device check. |
 | Additional boards | Select target hardware and define which capabilities must work there. |
 
-All six candidates remain unselected; none is a prerequisite for the completed
+All five candidates remain unselected; none is a prerequisite for the completed
 interactive-face milestone.

@@ -2,8 +2,8 @@
 
 **Status:** Original interactive-face milestone completed with user-reported
 CoreS3 validation on 2026-11-23. Device regression checks after the controller
-refactor remain pending. Future product scope remains subject to the user's
-priorities.
+refactor and the new local audio record/replay interaction remain pending.
+Future product scope remains subject to the user's priorities.
 
 ## Purpose and audience
 
@@ -17,7 +17,8 @@ The repository contains Arduino firmware that draws a face, changes its visual
 state on touch, animates blinking, and implements inactivity-based sleep and
 wake logic. The user confirmed the original milestone on CoreS3; evidence and
 limitations are in the [validation record](plan/interactive-face-validation.md).
-The controller refactor adds 15 passing native tests for state/timing decisions.
+Local two-second recording and automatic replay are now implemented with native
+state/timing tests; audio quality and device behavior remain unverified.
 Current host coverage and pending device checks belong in the [roadmap](roadmap.md).
 
 ## Completed first milestone
@@ -32,12 +33,13 @@ A user can:
 
 These outcomes describe the visual interaction behavior previously validated
 by the user. The refactored firmware still needs device regression checks.
-Audio and AI conversation remain later candidates.
+The current audio interaction replaces manual state cycling; see the
+[audio plan](plan/audio-record-replay.md). AI conversation remains a later candidate.
 
 ## Proposed boundary
 
-Microphone capture, speech recognition, generated responses, speech playback,
-Wi-Fi services, credentials, servo motion, persistent settings, and support for
+Beyond local record/replay, speech recognition, generated responses, Wi-Fi
+services, credentials, servo motion, persistent settings, and support for
 additional boards are later candidates. Select and design any of these only
 when requested; do not infer approval from a state named `LISTENING` or
 `SPEAKING`.
