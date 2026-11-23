@@ -19,22 +19,22 @@ RobotStateMachine.cpp; Arduino main, RobotController, FaceRenderer, and M5Unifie
 are excluded. The firmware builds the same helper and supplies millis() and
 M5.Touch.getDetail().wasPressed() at its hardware boundary.
 
-Focused coverage: startup, the full awake state cycle, inactivity just before
-and exactly at 30 seconds, press-driven timer refresh, press precedence at the
-timeout, and no extra cycle without another press event. Each awake state has
-three sleep/wake cycles, checking restoration and the refreshed wake timer.
-Explicit timestamps also cover the inactivity boundary across uint32_t rollover.
-Same-state assignment and repeated begin() semantics are covered too.
-Existing initialization is intentional in this refactor: begin() resets the
-clock to zero without resetting state, so pre-begin uptime counts toward sleep.
-Assigning the current state does not refresh that clock. Validation evidence is
-recorded in docs/plan/controller-unit-tests.md.
+The 12 tests cover ten automatic capture/replay cycles, repeated busy presses,
+held-event absence, completion races, stale completion facts, failures at each
+active phase, and retries. Parameterized cases check 4999/5000 ms watchdog
+boundaries (including simultaneous completion), playback handoff without a timer
+extension, and completion/failure/timeout inactivity refresh across uint32_t wrap.
+Idle boundaries, press precedence, three sleep/wake cycles, and initialization
+at current uptime are covered. begin(now) now resets to idle and starts its clock
+at now; public state setters were removed to keep audio and face state aligned.
+Simulated FAILED inputs represent initialization, request, or stopped-driver
+failures. They do not test M5Unified calls. See docs/plan/audio-record-replay.md.
 
 Firmware compile check (also no upload):
 
     pio run -e m5stack-cores3
 
-Native tests establish controller decisions only. Physical touch detection,
-renderer notifications and Serial output, face appearance, and blink recovery
-still need the CoreS3 checklist in docs/agent-workflow.md. A build does not prove
-those behaviors. Neither command above flashes a device.
+Native tests establish decisions and once-per-transition signals only; actual
+driver request counts, microphone/speaker routing, audio quality, physical touch,
+renderer/Serial notifications, and blink recovery require the audio plan's CoreS3
+checks. Neither command above flashes a device; a build does not prove behavior.

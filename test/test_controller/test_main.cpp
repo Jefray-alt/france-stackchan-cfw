@@ -2,6 +2,7 @@
 #include "RobotStateMachine.h"
 
 RobotStateMachine machine;
+using AudioStatus = RobotAudio::Status;
 
 void setUp()
 {
@@ -27,16 +28,31 @@ void test_startup_is_idle_without_a_transition()
   assertState(RobotState::IDLE);
 }
 
-void test_presses_cycle_through_all_awake_states()
+void enterPhase(unsigned phase, uint32_t now)
 {
-  TEST_ASSERT_TRUE(machine.update(true, 100));
-  assertState(RobotState::LISTENING);
-  TEST_ASSERT_TRUE(machine.update(true, 200));
-  assertState(RobotState::THINKING);
-  TEST_ASSERT_TRUE(machine.update(true, 300));
-  assertState(RobotState::SPEAKING);
-  TEST_ASSERT_TRUE(machine.update(true, 400));
-  assertState(RobotState::IDLE);
+  machine.begin(now);
+  TEST_ASSERT_TRUE(machine.update(true, now));
+  if (phase >= 1)
+  {
+    TEST_ASSERT_TRUE(machine.update(false, now + 100, AudioStatus::RECORDED));
+  }
+  if (phase >= 2)
+  {
+    TEST_ASSERT_TRUE(machine.update(false, now + 101, AudioStatus::PLAYING));
+  }
+}
+
+void test_busy_presses_do_not_cycle_or_queue()
+{
+  for (unsigned phase = 0; phase < 3; ++phase)
+  {
+    enterPhase(phase, 100);
+    RobotState expected = machine.getState();
+    TEST_ASSERT_FALSE(machine.update(true, 500));
+    TEST_ASSERT_FALSE(machine.update(true, 600));
+    TEST_ASSERT_FALSE(machine.update(false, 700)); // A held touch has no new event.
+    assertState(expected);
+  }
 }
 
 void test_inactivity_sleeps_and_stays_asleep()
@@ -55,150 +71,154 @@ void test_inactivity_starts_exactly_at_thirty_seconds()
   assertState(RobotState::SLEEPING);
 }
 
-void test_press_refreshes_inactivity_timer()
-{
-  TEST_ASSERT_TRUE(machine.update(true, 20000));
-  assertState(RobotState::LISTENING);
-  TEST_ASSERT_FALSE(machine.update(false, 30000));
-  assertState(RobotState::LISTENING);
-  TEST_ASSERT_FALSE(machine.update(false, 49999));
-  assertState(RobotState::LISTENING);
-  TEST_ASSERT_TRUE(machine.update(false, 50000));
-  assertState(RobotState::SLEEPING);
-}
-
-void test_press_at_timeout_takes_precedence_and_refreshes_timer()
+void test_press_at_idle_timeout_starts_capture()
 {
   TEST_ASSERT_TRUE(machine.update(true, 30000));
   assertState(RobotState::LISTENING);
   TEST_ASSERT_FALSE(machine.update(false, 30001));
   assertState(RobotState::LISTENING);
-  TEST_ASSERT_FALSE(machine.update(false, 59999));
-  assertState(RobotState::LISTENING);
-  TEST_ASSERT_TRUE(machine.update(false, 60000));
-  assertState(RobotState::SLEEPING);
 }
 
-void test_no_additional_cycle_without_another_press_event()
+void test_ten_cycles_advance_once_and_ignore_completion_presses()
 {
-  TEST_ASSERT_TRUE(machine.update(true, 100));
-  assertState(RobotState::LISTENING);
-
-  for (uint32_t now = 101; now <= 103; ++now)
+  for (uint32_t now = 100; now < 41100; now += 4100)
   {
-    TEST_ASSERT_FALSE(machine.update(false, now));
+    TEST_ASSERT_TRUE(machine.update(true, now));
     assertState(RobotState::LISTENING);
+    TEST_ASSERT_FALSE(machine.update(false, now + 1, AudioStatus::COMPLETE));
+    TEST_ASSERT_TRUE(machine.update(true, now + 2000, AudioStatus::RECORDED));
+    assertState(RobotState::THINKING);
+    TEST_ASSERT_FALSE(machine.update(true, now + 2001, AudioStatus::RECORDED));
+    TEST_ASSERT_TRUE(machine.update(true, now + 2002, AudioStatus::PLAYING));
+    assertState(RobotState::SPEAKING);
+    TEST_ASSERT_FALSE(machine.update(true, now + 2003, AudioStatus::PLAYING));
+    TEST_ASSERT_TRUE(machine.update(true, now + 4000, AudioStatus::COMPLETE));
+    assertState(RobotState::IDLE);
+    TEST_ASSERT_FALSE(machine.didFail());
+    TEST_ASSERT_FALSE(machine.update(false, now + 4001, AudioStatus::COMPLETE));
+    TEST_ASSERT_FALSE(machine.update(false, now + 4002, AudioStatus::RECORDED));
   }
-
-  TEST_ASSERT_TRUE(machine.update(true, 104));
-  assertState(RobotState::THINKING);
-  TEST_ASSERT_FALSE(machine.update(false, 105));
-  assertState(RobotState::THINKING);
 }
 
 void test_inactivity_boundary_across_uint32_rollover()
 {
-  TEST_ASSERT_TRUE(machine.setState(RobotState::SPEAKING, 0xFFFFF000u));
+  machine.begin(0xFFFFF000u);
   TEST_ASSERT_FALSE(machine.update(false, 0xFFFFFFFFu));
-  assertState(RobotState::SPEAKING);
   // 4096 ms remain before wrap; 25903/25904 are elapsed 29999/30000.
   TEST_ASSERT_FALSE(machine.update(false, 25903));
-  assertState(RobotState::SPEAKING);
+  assertState(RobotState::IDLE);
   TEST_ASSERT_TRUE(machine.update(false, 25904));
   assertState(RobotState::SLEEPING);
   TEST_ASSERT_TRUE(machine.update(true, 26004));
-  assertState(RobotState::SPEAKING);
+  assertState(RobotState::IDLE);
 }
 
-void assertWakeRestores(RobotState awakeState)
+void test_repeated_sleep_wake_returns_idle_and_requires_new_press()
 {
-  machine.setState(awakeState, 100);
-
-  for (uint32_t sleepAt = 30100; sleepAt <= 90300; sleepAt += 30100)
+  for (uint32_t sleepAt = 30000; sleepAt <= 90200; sleepAt += 30100)
   {
     TEST_ASSERT_TRUE(machine.update(false, sleepAt));
     assertState(RobotState::SLEEPING);
     TEST_ASSERT_FALSE(machine.update(false, sleepAt + 50));
     assertState(RobotState::SLEEPING);
     TEST_ASSERT_TRUE(machine.update(true, sleepAt + 100));
-    assertState(awakeState);
+    assertState(RobotState::IDLE);
     TEST_ASSERT_FALSE(machine.update(false, sleepAt + 30099));
-    assertState(awakeState);
+    assertState(RobotState::IDLE);
+  }
+  TEST_ASSERT_TRUE(machine.update(true, 120300));
+  assertState(RobotState::LISTENING);
+}
+
+void test_failure_at_each_phase_is_once_and_allows_fresh_retry()
+{
+  for (unsigned phase = 0; phase < 3; ++phase)
+  {
+    enterPhase(phase, 100);
+    TEST_ASSERT_TRUE(machine.update(true, 202, AudioStatus::FAILED));
+    assertState(RobotState::IDLE);
+    TEST_ASSERT_TRUE(machine.didFail());
+    TEST_ASSERT_FALSE(machine.update(false, 203, AudioStatus::FAILED));
+    TEST_ASSERT_FALSE(machine.didFail());
+    TEST_ASSERT_FALSE(machine.update(false, 204, AudioStatus::RECORDED));
+    TEST_ASSERT_TRUE(machine.update(true, 205));
+    assertState(RobotState::LISTENING);
+    TEST_ASSERT_FALSE(machine.update(false, 206, AudioStatus::COMPLETE));
+    TEST_ASSERT_TRUE(machine.update(false, 2205, AudioStatus::RECORDED));
+    assertState(RobotState::THINKING);
   }
 }
 
-void test_wake_restores_idle()
+void test_watchdog_boundaries_and_rollover_at_each_phase()
 {
-  assertWakeRestores(RobotState::IDLE);
+  const uint32_t starts[] = {100, 0xFFFFF000u};
+  const AudioStatus completions[] = {
+      AudioStatus::RECORDED, AudioStatus::PLAYING, AudioStatus::COMPLETE};
+  for (uint32_t start : starts)
+  {
+    for (unsigned phase = 0; phase < 3; ++phase)
+    {
+      enterPhase(phase, start);
+      uint32_t operationStart = start + (phase == 0 ? 0 : 100);
+      TEST_ASSERT_FALSE(machine.update(true, operationStart + 4999));
+      TEST_ASSERT_TRUE(machine.update(true, operationStart + 5000, completions[phase]));
+      assertState(RobotState::IDLE);
+      TEST_ASSERT_TRUE(machine.didFail());
+      TEST_ASSERT_FALSE(machine.update(false, operationStart + 5001, AudioStatus::COMPLETE));
+      TEST_ASSERT_FALSE(machine.didFail());
+      TEST_ASSERT_TRUE(machine.update(true, operationStart + 5002));
+      assertState(RobotState::LISTENING);
+    }
+  }
 }
 
-void test_wake_restores_listening()
+void test_completion_failure_and_timeout_refresh_idle_clock()
 {
-  assertWakeRestores(RobotState::LISTENING);
+  const uint32_t starts[] = {100, 0xFFFFF000u};
+  for (uint32_t start : starts)
+  {
+    for (unsigned outcome = 0; outcome < 3; ++outcome)
+    {
+      enterPhase(outcome == 0 ? 2 : 0, start);
+      uint32_t endedAt = start + (outcome == 2 ? 5000 : 2100);
+      AudioStatus status = outcome == 0 ? AudioStatus::COMPLETE :
+          (outcome == 1 ? AudioStatus::FAILED : AudioStatus::RECORDING);
+      TEST_ASSERT_TRUE(machine.update(true, endedAt, status));
+      assertState(RobotState::IDLE);
+      TEST_ASSERT_FALSE(machine.update(false, endedAt + 29999));
+      TEST_ASSERT_TRUE(machine.update(false, endedAt + 30000));
+      assertState(RobotState::SLEEPING);
+      TEST_ASSERT_TRUE(machine.update(true, endedAt + 30001));
+      assertState(RobotState::IDLE);
+    }
+  }
 }
 
-void test_wake_restores_thinking()
+void test_begin_resets_state_and_uses_current_uptime()
 {
-  assertWakeRestores(RobotState::THINKING);
-}
-
-void test_wake_restores_speaking()
-{
-  assertWakeRestores(RobotState::SPEAKING);
-}
-
-void test_same_state_assignment_does_not_refresh_inactivity()
-{
-  TEST_ASSERT_FALSE(machine.setState(RobotState::IDLE, 20000));
-  TEST_ASSERT_TRUE(machine.update(false, 30000));
-  assertState(RobotState::SLEEPING);
-  TEST_ASSERT_FALSE(machine.setState(RobotState::SLEEPING, 31000));
-  TEST_ASSERT_TRUE(machine.update(true, 32000));
+  TEST_ASSERT_TRUE(machine.update(true, 100));
+  machine.begin(90000);
   assertState(RobotState::IDLE);
-}
-
-void test_begin_retains_awake_state_and_resets_timer_to_zero()
-{
-  TEST_ASSERT_TRUE(machine.setState(RobotState::SPEAKING, 90000));
-
-  machine.begin();
-
-  assertState(RobotState::SPEAKING);
-  TEST_ASSERT_TRUE(machine.update(false, 90001));
+  TEST_ASSERT_FALSE(machine.didFail());
+  TEST_ASSERT_FALSE(machine.update(false, 119999));
+  TEST_ASSERT_TRUE(machine.update(false, 120000));
   assertState(RobotState::SLEEPING);
-  TEST_ASSERT_TRUE(machine.update(true, 90002));
-  assertState(RobotState::SPEAKING);
-}
-
-void test_begin_retains_sleeping_state_and_wake_target()
-{
-  machine.setState(RobotState::THINKING, 100);
-  machine.setState(RobotState::SLEEPING, 200);
-
-  machine.begin();
-
-  assertState(RobotState::SLEEPING);
-  TEST_ASSERT_TRUE(machine.update(true, 300));
-  assertState(RobotState::THINKING);
 }
 
 int main()
 {
   UNITY_BEGIN();
   RUN_TEST(test_startup_is_idle_without_a_transition);
-  RUN_TEST(test_presses_cycle_through_all_awake_states);
+  RUN_TEST(test_busy_presses_do_not_cycle_or_queue);
   RUN_TEST(test_inactivity_sleeps_and_stays_asleep);
   RUN_TEST(test_inactivity_starts_exactly_at_thirty_seconds);
-  RUN_TEST(test_press_refreshes_inactivity_timer);
-  RUN_TEST(test_press_at_timeout_takes_precedence_and_refreshes_timer);
-  RUN_TEST(test_no_additional_cycle_without_another_press_event);
+  RUN_TEST(test_press_at_idle_timeout_starts_capture);
+  RUN_TEST(test_ten_cycles_advance_once_and_ignore_completion_presses);
   RUN_TEST(test_inactivity_boundary_across_uint32_rollover);
-  RUN_TEST(test_wake_restores_idle);
-  RUN_TEST(test_wake_restores_listening);
-  RUN_TEST(test_wake_restores_thinking);
-  RUN_TEST(test_wake_restores_speaking);
-  RUN_TEST(test_same_state_assignment_does_not_refresh_inactivity);
-  RUN_TEST(test_begin_retains_awake_state_and_resets_timer_to_zero);
-  RUN_TEST(test_begin_retains_sleeping_state_and_wake_target);
+  RUN_TEST(test_repeated_sleep_wake_returns_idle_and_requires_new_press);
+  RUN_TEST(test_failure_at_each_phase_is_once_and_allows_fresh_retry);
+  RUN_TEST(test_watchdog_boundaries_and_rollover_at_each_phase);
+  RUN_TEST(test_completion_failure_and_timeout_refresh_idle_clock);
+  RUN_TEST(test_begin_resets_state_and_uses_current_uptime);
   return UNITY_END();
 }

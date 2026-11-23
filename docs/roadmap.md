@@ -1,7 +1,7 @@
 # Roadmap
 
-Updated on 2026-11-23 to reconcile earlier device validation and current native
-controller tests. This roadmap has no delivery estimates. Future work remains
+Updated on 2026-11-23 for local audio integration and pending device validation.
+This roadmap has no delivery estimates. Future work remains
 subject to the user's priorities.
 
 ## Completed: establish a reliable interactive face
@@ -26,14 +26,15 @@ not supplied.
 
 ## Current verification gap
 
-The controller extraction preserves the existing decisions and passes native
-tests and `pio run -e m5stack-cores3`. Those results do not validate physical
-behavior after the refactor. Repeat the [CoreS3 checklist](agent-workflow.md#hardware-checklist)
-for touch/hold detection, displayed states, Serial output, and repeated sleep/wake
-with blink recovery. These checks remain pending on this candidate.
+Local two-second microphone capture and automatic speaker replay replace manual
+state cycling. Busy presses are ignored, sleep is idle-only, and a sleeping
+press wakes to idle. The 12 current native tests cover decisions, recovery, and
+timing; firmware compiles. The [audio plan](plan/audio-record-replay.md) records
+pending CoreS3 checks for sound, full clip tails, ten cycles, rapid/held touches,
+display/Serial agreement, repeated sleep/wake, blink recovery, and driver cleanup.
 
-Earlier device evidence remains user-reported. No new device check or firmware
-upload was performed for the controller extraction or this documentation update.
+Earlier device evidence remains user-reported. No device check or firmware
+upload was performed for this audio implementation.
 
 ## Development workflow
 
@@ -44,7 +45,6 @@ confirmation and controller-test results are recorded separately above.
 
 ## Next
 
-No new implementation feature is selected. When requested, choose one outcome
-from the [backlog](feature-backlog.md), create its plan, verify it, and update
-this roadmap with evidence. Do not automatically begin an audio, network, or AI
-integration.
+Validate the implemented audio interaction when device work is authorized.
+Further features require selection from the [backlog](feature-backlog.md) and
+their own approved plan.

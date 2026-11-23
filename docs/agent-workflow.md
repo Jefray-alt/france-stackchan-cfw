@@ -81,6 +81,22 @@ implementation handoff. If the scope or approach changes materially, present
 the revised plan and wait for renewed approval before implementing the affected
 work. Routine corrections within the approved scope do not need another gate.
 
+### User approval before implementation
+
+Present the plan to the user and wait for explicit approval before implementing
+it. For work without a plan file, present the inline scope, checks, and proposed
+commit and wait for approval in the same way. Publishing the plan is not
+approval. A request to start working, selection of a feature, or answers to
+requirements questions do not approve implementation.
+
+Until approval arrives, limit work to checkout inspection, research, and plan
+preparation or revision. Do not edit implementation files, route implementation
+to the implementer, or start development agents. Record the user's approval and
+the approved scope in the plan or task brief, and include that record in the
+implementation handoff. If the scope or approach changes materially, present
+the revised plan and wait for renewed approval before implementing the affected
+work. Routine corrections within the approved scope do not need another gate.
+
 ## Implement and verify one task at a time
 
 1. Confirm recorded user approval, acceptance criteria, baseline, ownership, and

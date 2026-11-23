@@ -1,8 +1,10 @@
 #include "RobotStateMachine.h"
 
-void RobotStateMachine::begin()
+void RobotStateMachine::begin(uint32_t now)
 {
-  lastStateChange = 0;
+  state = RobotState::IDLE;
+  lastStateChange = now;
+  operationFailed = false;
 }
 
 RobotState RobotStateMachine::getState() const
@@ -17,46 +19,57 @@ bool RobotStateMachine::setState(RobotState newState, uint32_t now)
     return false;
   }
 
-  lastStateChange = now;
-  state = newState;
-
-  if (state != RobotState::SLEEPING)
+  // THINKING queues playback; entering SPEAKING must not extend its watchdog.
+  if (newState != RobotState::SPEAKING)
   {
-    lastAwakeState = state;
+    lastStateChange = now;
   }
 
+  state = newState;
   return true;
 }
 
-bool RobotStateMachine::update(bool wasPressed, uint32_t now)
+bool RobotStateMachine::update(
+    bool wasPressed, uint32_t now, RobotAudio::Status audioStatus)
 {
-  if (!wasPressed)
+  operationFailed = false;
+  if (state == RobotState::LISTENING || state == RobotState::THINKING ||
+      state == RobotState::SPEAKING)
   {
-    if (state != RobotState::SLEEPING &&
-        static_cast<uint32_t>(now - lastStateChange) >= 30000)
+    operationFailed = audioStatus == RobotAudio::Status::FAILED ||
+        static_cast<uint32_t>(now - lastStateChange) >= 5000;
+    if (operationFailed)
     {
-      return setState(RobotState::SLEEPING, now);
+      return setState(RobotState::IDLE, now);
     }
 
+    if (state == RobotState::LISTENING && audioStatus == RobotAudio::Status::RECORDED)
+    {
+      return setState(RobotState::THINKING, now);
+    }
+    if (state == RobotState::THINKING && audioStatus == RobotAudio::Status::PLAYING)
+    {
+      return setState(RobotState::SPEAKING, now);
+    }
+    if (state == RobotState::SPEAKING && audioStatus == RobotAudio::Status::COMPLETE)
+    {
+      return setState(RobotState::IDLE, now);
+    }
+
+    // Ignore busy presses, including a press coincident with completion.
     return false;
   }
 
-  switch (state)
+  if (wasPressed)
   {
-  case RobotState::IDLE:
-    return setState(RobotState::LISTENING, now);
+    return setState(state == RobotState::SLEEPING
+        ? RobotState::IDLE : RobotState::LISTENING, now);
+  }
 
-  case RobotState::LISTENING:
-    return setState(RobotState::THINKING, now);
-
-  case RobotState::THINKING:
-    return setState(RobotState::SPEAKING, now);
-
-  case RobotState::SPEAKING:
-    return setState(RobotState::IDLE, now);
-
-  case RobotState::SLEEPING:
-    return setState(lastAwakeState, now);
+  if (state == RobotState::IDLE &&
+      static_cast<uint32_t>(now - lastStateChange) >= 30000)
+  {
+    return setState(RobotState::SLEEPING, now);
   }
 
   return false;

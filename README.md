@@ -2,9 +2,9 @@
 
 Custom firmware for an M5Stack CoreS3, built with PlatformIO, the Arduino
 framework, and M5Unified. The current source implements a touch-driven face
-with idle, listening, thinking, speaking, and sleeping states. Listening,
-thinking, and speaking are visual states; audio and AI integration are future
-candidates.
+with idle, listening, thinking, speaking, and sleeping states. A tap records a
+two-second microphone clip and automatically replays it through the speaker.
+Audio is implemented but still needs CoreS3 validation; AI remains a future candidate.
 
 ## Repository
 
@@ -12,6 +12,7 @@ candidates.
 - `src/main.cpp`: hardware initialization and the main update loop.
 - `src/RobotController.cpp`: touch input, rendering, and state-change logging.
 - `src/RobotStateMachine.cpp`: hardware-independent state and inactivity decisions.
+- `src/RobotAudio.cpp`: fixed PCM buffer and exclusive microphone/speaker lifecycle.
 - `src/FaceRenderer.cpp`: face drawing and blink timing.
 - `include/`: project headers and the shared `RobotState` enum.
 - `lib/`: project-specific libraries; currently contains a placeholder README.
@@ -69,11 +70,26 @@ Startup prints `Robot initialized`; state transitions print
 `Robot state changed: <number>`. State numbers follow the declaration order
 in `include/RobotState.h`.
 
+### Record and replay
+
+Tap while idle to record two seconds, then hear the clip automatically.
+The face shows listening during capture, thinking during handoff, and speaking
+during playback before returning to idle. Busy presses and held touches do not
+queue another clip. After 30 seconds idle the face sleeps; the first sleeping
+press wakes to idle, and the next distinct press records.
+
+Audio failures and five-second operation timeouts print one diagnostic, discard
+the clip, and return to idle for retry. M5Unified driver cleanup may wait inside
+library calls; the watchdog cannot preempt those waits. Volume starts at 128/255.
+The [audio plan](docs/plan/audio-record-replay.md) lists pending device checks:
+full intelligible playback, ten cycles, busy touches, blinking/Serial agreement,
+sleep/wake, and recovery without resets, distortion, or stuck audio.
+
 ### Verification
 
 A successful build checks compilation and linking. Touch, display, sleep,
 wake, and blink behavior also need verification on the physical CoreS3.
-Use the [hardware checklist](docs/agent-workflow.md#hardware-checklist) and
+Use the [current audio checklist](docs/plan/audio-record-replay.md) and
 record what actually ran in the task plan when required, or in the handoff or PR.
 
 Run deterministic controller tests on the host (requires a C++ compiler):
