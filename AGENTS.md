@@ -28,15 +28,24 @@ in the roadmap or backlog.
 4. For medium and large changes, publish ordered tasks and proposed commits in
    a plan. For small or documentation-only changes, give a brief inline scope
    and commit intent without creating a plan file.
-5. Implement and review one cohesive task at a time, with its tests and docs.
-6. Record validation and limitations; update the roadmap only when a product
+5. Present the plan or inline scope to the user and wait for explicit approval
+   before implementation. Publishing a plan, choosing a feature, or clarifying
+   requirements does not count as approval. Record approval in the plan or task
+   brief before routing implementation or starting development agents.
+6. Implement and review one cohesive task at a time, with its tests and docs.
+7. Record validation and limitations; update the roadmap only when a product
    capability is actually completed.
+
+Before approval, limit work to inspection, research, and preparing or revising
+the plan. If the scope or approach changes materially, present the revised plan
+and wait for approval again before implementing the affected work.
 
 Follow [the development workflow](docs/agent-workflow.md) for startup checks,
 review, and handoff. For code-change requests, the main session routes work to
-the configured `implementer` by default, passing user requirements and decisions.
-Planning, exploration, and small documentation/configuration tasks can remain
-in the main session. The implementer uses fresh `developer` and independent
+the configured `implementer` after plan approval, passing user requirements,
+decisions, and the approval record. Planning, exploration, and small
+documentation/configuration tasks can remain in the main session. The
+implementer uses fresh `developer` and independent
 `code_reviewer` pairs, one task at a time, without worker delegation.
 
 The roles are configured under `.codex/agents/`. Describe independent review

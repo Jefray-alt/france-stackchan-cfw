@@ -65,9 +65,26 @@ advice, not a size-based approval gate. Follow repository approval requirements
 for the chosen scope, and revise the plan if discovery changes scope or
 dependencies.
 
+### User approval before implementation
+
+Present the plan to the user and wait for explicit approval before implementing
+it. For work without a plan file, present the inline scope, checks, and proposed
+commit and wait for approval in the same way. Publishing the plan is not
+approval. A request to start working, selection of a feature, or answers to
+requirements questions do not approve implementation.
+
+Until approval arrives, limit work to checkout inspection, research, and plan
+preparation or revision. Do not edit implementation files, route implementation
+to the implementer, or start development agents. Record the user's approval and
+the approved scope in the plan or task brief, and include that record in the
+implementation handoff. If the scope or approach changes materially, present
+the revised plan and wait for renewed approval before implementing the affected
+work. Routine corrections within the approved scope do not need another gate.
+
 ## Implement and verify one task at a time
 
-1. Confirm acceptance criteria, baseline, ownership, and relevant existing changes.
+1. Confirm recorded user approval, acceptance criteria, baseline, ownership, and
+   relevant existing changes.
 2. For testable behavior, demonstrate a meaningful failure before the fix when
    practical. Then implement the minimum change and show that it passes.
 3. For hardware-only behavior, record the reproduction and expected device
@@ -133,10 +150,11 @@ Project-scoped role files live under `.codex/agents/`:
 - `code_reviewer.toml`: independently reviews the frozen candidate and reports
   findings. Model and reasoning are selected separately from the developer.
 
-For code-change requests, the main session passes requirements and decisions to
-the implementer. Planning and exploration remain in the main session. Small
-documentation/configuration work, including installing these roles, can stay
-in the main session with an explicitly identified self-review.
+For code-change requests, after explicit plan approval the main session passes
+requirements, decisions, and the approval record to the implementer. Planning
+and exploration remain in the main session. Small documentation/configuration
+work, including installing these roles, can stay in the main session with an
+explicitly identified self-review.
 
 Check the live role definitions before routing implementation. Files on disk
 are configuration, not proof that the session has loaded them. If new roles or
@@ -150,7 +168,9 @@ Self-review must never be reported as independent review.
 
 - The implementer coordinates the tasks and shared checkout. The main session
   publishes the ordered plan for medium and large changes, or a brief inline
-  task scope for small changes, before workers start.
+  task scope for small changes, and obtains explicit user approval before routing
+  implementation. The implementer verifies the approval record before workers
+  start; publication alone does not authorize implementation.
 - For each task, use a fresh developer and independent reviewer, then reuse
   that pair for corrections. Workers must not delegate further.
 - Give the developer the task ID, baseline, requirements, acceptance criteria,
