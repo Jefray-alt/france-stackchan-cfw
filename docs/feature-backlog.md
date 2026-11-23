@@ -8,8 +8,9 @@ user and detail it in a [task plan](plan/template.md).
 
 The user confirmed the original interactive-face milestone on CoreS3 on
 2026-11-23; see the [validation record](plan/interactive-face-validation.md).
-That evidence predates the controller refactor. Device regression checks on
-the refactored firmware remain pending.
+That evidence predates the controller refactor. The user also confirmed local
+audio record/replay working on CoreS3 on 2026-11-24; detailed current-firmware
+touch/display/Serial/sleep/wake/blink regression observations remain unrecorded.
 
 | Original priority | Capability | Status |
 |---|---|---|
@@ -22,11 +23,12 @@ the refactored firmware remain pending.
 
 | Original priority | Capability | Status and next evidence |
 |---|---|---|
-| 5 | Reproducible regression checks | 12 current native tests cover the audio interaction and timing; see the [audio plan](plan/audio-record-replay.md). Physical audio/touch/display/Serial/sleep/wake/blink checks remain pending. |
+| 5 | Reproducible regression checks | 12 current native tests cover the audio interaction and timing. Audio has user-confirmed hardware validation; detailed per-scenario device results remain unrecorded. See the [audio plan](plan/audio-record-replay.md). |
 
 Keep detailed acceptance criteria and any confirmed defects in the active task
-plan. The selected local two-second record/replay interaction is implemented;
-device validation remains pending in the [audio plan](plan/audio-record-replay.md).
+plan. The selected local two-second record/replay milestone is complete with
+user-confirmed CoreS3 validation; evidence and limits are in the
+[audio validation record](plan/audio-record-replay.md#hardware-validation-follow-up).
 
 ## Later candidates
 

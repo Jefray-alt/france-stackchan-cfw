@@ -1,8 +1,9 @@
 # Product brief: CoreS3 Stack-chan firmware
 
 **Status:** Original interactive-face milestone completed with user-reported
-CoreS3 validation on 2026-11-23. Device regression checks after the controller
-refactor and the new local audio record/replay interaction remain pending.
+CoreS3 validation on 2026-11-23. Local audio record/replay was user-validated on
+CoreS3 on 2026-11-24; detailed post-refactor regression observations remain
+unrecorded.
 Future product scope remains subject to the user's priorities.
 
 ## Purpose and audience
@@ -17,8 +18,9 @@ The repository contains Arduino firmware that draws a face, changes its visual
 state on touch, animates blinking, and implements inactivity-based sleep and
 wake logic. The user confirmed the original milestone on CoreS3; evidence and
 limitations are in the [validation record](plan/interactive-face-validation.md).
-Local two-second recording and automatic replay are now implemented with native
-state/timing tests; audio quality and device behavior remain unverified.
+Local two-second recording and automatic replay are implemented with native
+state/timing tests and user-confirmed hardware validation on 2026-11-24; see the
+[audio validation record](plan/audio-record-replay.md#hardware-validation-follow-up).
 Current host coverage and pending device checks belong in the [roadmap](roadmap.md).
 
 ## Completed first milestone
@@ -32,7 +34,8 @@ A user can:
 5. Wake it by touch, restore the previous awake state, and continue interacting.
 
 These outcomes describe the visual interaction behavior previously validated
-by the user. The refactored firmware still needs device regression checks.
+by the user. Detailed touch/blink/sleep/wake regression observations for the
+current firmware remain unrecorded.
 The current audio interaction replaces manual state cycling; see the
 [audio plan](plan/audio-record-replay.md). AI conversation remains a later candidate.
 

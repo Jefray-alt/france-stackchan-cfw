@@ -1,6 +1,6 @@
 # Roadmap
 
-Updated on 2026-11-23 for local audio integration and pending device validation.
+Updated on 2026-11-24 for user-confirmed CoreS3 audio validation.
 This roadmap has no delivery estimates. Future work remains
 subject to the user's priorities.
 
@@ -24,17 +24,23 @@ not supplied.
 | Blinking | Approximately 3 seconds open and 150 ms closed while awake | Previously user-validated, including wake recovery; no automated renderer/blink coverage. |
 | Automated checks | Native Unity controller suite; see [test instructions](../test/README) | 15/15 pass; results and limitations are in the [controller test plan](plan/controller-unit-tests.md). |
 
-## Current verification gap
+## Completed: local audio record and replay
 
 Local two-second microphone capture and automatic speaker replay replace manual
 state cycling. Busy presses are ignored, sleep is idle-only, and a sleeping
 press wakes to idle. The 12 current native tests cover decisions, recovery, and
-timing; firmware compiles. The [audio plan](plan/audio-record-replay.md) records
-pending CoreS3 checks for sound, full clip tails, ten cycles, rapid/held touches,
-display/Serial agreement, repeated sleep/wake, blink recovery, and driver cleanup.
+timing; firmware compiles. On 2026-11-24 the user confirmed audio is now working
+through hardware validation on CoreS3. The local record/replay milestone is
+complete based on that confirmation; see the
+[validation record](plan/audio-record-replay.md#hardware-validation-follow-up).
 
-Earlier device evidence remains user-reported. No device check or firmware
-upload was performed for this audio implementation.
+## Remaining verification detail
+
+Device evidence is user-reported. The exact flashed revision, Serial logs,
+cycle counts, and individual results for clip tails, busy touches, sleep/wake,
+blink recovery, and driver cleanup were not supplied. The earlier third-attempt
+playback issue has no confirmed diagnosis in this record. No assistant-operated
+device check or firmware upload was performed for this documentation update.
 
 ## Development workflow
 
@@ -45,6 +51,6 @@ confirmation and controller-test results are recorded separately above.
 
 ## Next
 
-Validate the implemented audio interaction when device work is authorized.
-Further features require selection from the [backlog](feature-backlog.md) and
-their own approved plan.
+No further feature is selected. Choose the next outcome from the
+[backlog](feature-backlog.md) and prepare its own approved plan. Retain the audio
+checklist for regression checks when firmware changes.

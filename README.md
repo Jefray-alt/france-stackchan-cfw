@@ -4,7 +4,8 @@ Custom firmware for an M5Stack CoreS3, built with PlatformIO, the Arduino
 framework, and M5Unified. The current source implements a touch-driven face
 with idle, listening, thinking, speaking, and sleeping states. A tap records a
 two-second microphone clip and automatically replays it through the speaker.
-Audio is implemented but still needs CoreS3 validation; AI remains a future candidate.
+Audio record/replay was user-validated on CoreS3 on 2026-11-24;
+AI remains a future candidate.
 
 ## Repository
 
@@ -81,9 +82,10 @@ press wakes to idle, and the next distinct press records.
 Audio failures and five-second operation timeouts print one diagnostic, discard
 the clip, and return to idle for retry. M5Unified driver cleanup may wait inside
 library calls; the watchdog cannot preempt those waits. Volume starts at 128/255.
-The [audio plan](docs/plan/audio-record-replay.md) lists pending device checks:
-full intelligible playback, ten cycles, busy touches, blinking/Serial agreement,
-sleep/wake, and recovery without resets, distortion, or stuck audio.
+The [audio validation record](docs/plan/audio-record-replay.md#hardware-validation-follow-up)
+records the user's confirmation that audio is working on CoreS3. Individual
+checklist observations, including cycle counts and failure recovery, were not
+supplied; the plan retains the scenarios for future regression checks.
 
 ### Verification
 

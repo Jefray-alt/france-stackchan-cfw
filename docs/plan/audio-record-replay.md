@@ -1,6 +1,10 @@
 # CoreS3 audio record and replay
 
-**Status:** Implementation complete; CoreS3 validation pending.
+**Status:** Complete; user-confirmed CoreS3 audio validation on 2026-11-24.
+
+T1/T2 evidence below records the original implementation checks. Subsequent
+hardware confirmation and its limits are recorded in the
+[validation follow-up](#hardware-validation-follow-up).
 
 **Outcome:** Tap the awake CoreS3 to record a two-second clip with its built-in
 microphone, hear it automatically through its speaker, and return to idle while
@@ -159,12 +163,14 @@ decisions, then pass `pio test -e native` and
 links, and commands. Use `~/.platformio/penv/bin/pio` if `pio` is absent from PATH.
 No uploads are included in this plan's implementation authorization.
 
-**Hardware checks, pending separately authorized upload:** On the intended
+**Hardware regression checklist:** On the intended
 CoreS3, record intelligible speech and hear the complete clip at reasonable
 volume; check ten consecutive cycles, rapid presses and held touches while
 busy, continued blinking, Serial/face agreement, idle timeout, repeated wake
 and record cycles, and absence of resets, stuck states, or sustained distortion.
 Record firmware revision, resolved dependencies, observations, and any gaps.
+Overall audio operation is now user-confirmed; individual checklist results
+were not supplied. Uploads by the assistant still require authorized device work.
 
 **Proposed commit:** `feat(audio): connect touch recording to automatic replay`
 
@@ -229,8 +235,31 @@ Record firmware revision, resolved dependencies, observations, and any gaps.
   paths were checked separately. Only this untracked plan was added.
 - T1 passed review round 1. T2 passed round 1 for implementation and round 2
   for its README checklist correction; build/native results remain unchanged.
-- Hardware: no device checks or uploads performed. The pre-existing controller
-  refactor's device regression gap remains until relevant checks are observed.
+- Hardware during implementation: no assistant-operated device checks or uploads.
+  User confirmation received later is recorded below; detailed controller/renderer
+  regression observations remain unrecorded.
+
+## Hardware validation follow-up
+
+- On 2026-11-24 (Asia/Manila), the user requested this documentation update and
+  reported: “The audio is now working thru hardware validation.” Record local
+  microphone capture and speaker replay as user-validated on CoreS3.
+- The earlier report of playback stopping after the third recording is followed
+  by this working-audio confirmation. No root cause, corrective change, or
+  repeated-cycle count was supplied; do not infer a diagnosed or tested fix.
+- The exact flashed revision, dependency versions on that device, Serial logs,
+  and individual checklist observations were not supplied. Checkout `main` at
+  `bf76eddf5af2f27107de60dba1dcaa3dbf6ea415` was clean when recording this evidence;
+  it is a documentation baseline, not a confirmed flashed revision.
+- This follow-up completes the validation-record work in the approved audio
+  scope. Only README, brief, backlog, roadmap, and this plan are updated on
+  `docs/audio-hardware-validation`; no firmware changes, device upload, or new
+  feature selection. Review mode: main-session self-review.
+- Documentation checks passed (exit 0): Python checked five documents, 30 local
+  links/anchors, whitespace, final newlines, and code fences; `git diff --check`
+  passed. Self-review checked the full diff and evidence attribution. A failing
+  firmware test adds no value to this documentation-only update; build/native
+  tests were not rerun, and earlier test evidence remains historical.
 
 ## Handoff
 
@@ -238,4 +267,6 @@ Record firmware revision, resolved dependencies, observations, and any gaps.
 - T1: `7dae9cd`, `feat(audio): add bounded cores3 recording and playback`.
 - T2: `feat(audio): connect touch recording to automatic replay`, committed
   separately after its checks and independent PASS.
+- Hardware confirmation: recorded in the documentation follow-up above;
+  `docs(audio): record user-confirmed hardware validation` is the follow-up commit.
 - No push authorized. Report any hardware checks still outstanding explicitly.
