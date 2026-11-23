@@ -56,11 +56,14 @@ implementation, relevant tests, and docs for each outcome together. A small,
 indivisible change can be one task; say why. Do not add tasks solely to increase
 their count or detail unrelated future features.
 
-For planned work, estimate total added and deleted lines, including tests
-and docs. If it appears likely to exceed 1,000 lines and that larger scope is
-not already authorized, propose a smaller outcome before implementation.
-This is a planning guardrail, not a hard implementation cutoff. Revise the plan
-if discovery changes scope or dependencies.
+Judge planned work by its outcomes, complexity, dependencies, and validation
+needs. A rough estimate of added and deleted lines across code, tests, and docs
+can help communicate size, but accuracy is not required and there is no
+line-count limit. When the plan looks large, tell the user and recommend a more
+contained outcome, explaining what it would defer. Treat that recommendation as
+advice, not a size-based approval gate. Follow repository approval requirements
+for the chosen scope, and revise the plan if discovery changes scope or
+dependencies.
 
 ## Implement and verify one task at a time
 

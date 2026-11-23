@@ -48,10 +48,11 @@ role files does not prove that the current session has loaded them.
 ## Scope and local changes
 
 - Keep each plan focused on one outcome; defer unrelated fixes and features.
-- Estimate total added and deleted lines across code, tests, and docs. If the
-  requested plan appears likely to exceed 1,000 lines, propose a smaller slice
-  before implementation, unless the user already authorized the larger scope.
-  Splitting tasks does not reduce the total estimate.
+- Judge scope from the plan's outcomes, complexity, dependencies, and validation
+  needs. Line estimates across code, tests, and docs may be rough and are only
+  a planning hint; there is no line-count limit or accuracy requirement.
+  When the plan looks large, flag that to the user and recommend a more
+  contained outcome. This recommendation is advisory, not a size-based gate.
 - Do not expand the agreed product scope or start the next feature automatically.
 - Preserve existing user edits. Work alongside unrelated changes when safely
   isolated; stop for overlapping changes, merge conflicts, or ambiguous ownership.
