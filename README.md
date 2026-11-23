@@ -74,7 +74,7 @@ in `include/RobotState.h`.
 A successful build checks compilation and linking. Touch, display, sleep,
 wake, and blink behavior also need verification on the physical CoreS3.
 Use the [hardware checklist](docs/agent-workflow.md#hardware-checklist) and
-record what actually ran in the current task plan.
+record what actually ran in the task plan when required, or in the handoff or PR.
 
 Run deterministic controller tests on the host (requires a C++ compiler):
 
@@ -95,7 +95,8 @@ Read [AGENTS.md](AGENTS.md) and the shared
 - [Feature backlog](docs/feature-backlog.md): observed capabilities and proposed work.
 - [Roadmap](docs/roadmap.md): source implementation status and validation gaps.
 - [Task plans](docs/plan/): focused requirements, decisions, tasks, and evidence.
-- [Plan template](docs/plan/template.md): starting point for the next implementation.
+- [Plan template](docs/plan/template.md): for medium and large code/configuration
+  changes. Small changes and documentation-only work do not require a plan file.
 
 ### Development agents
 

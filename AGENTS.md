@@ -7,18 +7,27 @@
 - [Roadmap](docs/roadmap.md): implementation status and validation gaps.
 - `docs/plan/<task>.md`: current requirements, decisions, ordered tasks, and evidence.
 
-Before implementation, create or update a focused Markdown plan under
-`docs/plan/`, using a descriptive lowercase, hyphenated filename. Start with
-[the plan template](docs/plan/template.md). Update the same file as scope,
-decisions, and task status change; do not duplicate detailed requirements in
-the roadmap or backlog. For a small documentation change, keep the plan brief.
+Create or update a focused Markdown plan under `docs/plan/` for medium and large
+code or configuration changes. This includes substantive refactors, changes
+across components, and work with significant design decisions or dependencies.
+Small, isolated changes do not require a plan file. Purely documentation changes
+do not require a plan file, regardless of size, unless the user requests one.
+For work without a plan file, state scope, checks, and commit intent briefly in
+the conversation or PR.
+
+When a plan is required, use a descriptive lowercase, hyphenated filename and
+start with [the plan template](docs/plan/template.md). Update the same file as
+scope, decisions, and task status change; do not duplicate detailed requirements
+in the roadmap or backlog.
 
 ## Workflow
 
 1. Understand the request and inspect the relevant source and checkout state.
 2. For new product direction, clarify the brief and priorities before coding.
 3. Detail only the current requested outcome and its acceptance criteria.
-4. Publish an ordered task and proposed commit plan before implementation.
+4. For medium and large changes, publish ordered tasks and proposed commits in
+   a plan. For small or documentation-only changes, give a brief inline scope
+   and commit intent without creating a plan file.
 5. Implement and review one cohesive task at a time, with its tests and docs.
 6. Record validation and limitations; update the roadmap only when a product
    capability is actually completed.
@@ -88,8 +97,21 @@ role files does not prove that the current session has loaded them.
   such as `fix/sleep-wake-state` or `docs/development-workflow`.
 - Preserve an existing task checkout and unrelated local changes. Do not switch
   branches just to satisfy a convention when it risks mixing another task's work.
-- Commit or push only when requested or already authorized. For authorized
-  commits, stage exact task paths and keep cohesive task commits separate.
+- Atomic commits are mandatory: each commit must contain one cohesive,
+  independently reviewable task, including its relevant code, tests, and docs.
+  Split unrelated changes into separate commits; one plan may require multiple
+  commits.
+- A request to implement a change authorizes its atomic task commits unless the
+  user explicitly requests no commits. When a plan exists, follow its proposed
+  commit boundaries. Do not leave completed tasks uncommitted merely because
+  the implementation request did not repeat "commit". Push only when requested
+  or already authorized.
+- Finish the task's required checks and review, stage only its exact owned
+  changes, and commit it before starting the next task. Preserve existing user
+  edits and unrelated work.
+- Keep task commits separate. Combine or squash them, or amend an earlier
+  task's commit to absorb a later task, only when the user explicitly requests
+  it. A request for one plan or one PR does not imply one commit.
 - Use Conventional Commits: `<type>(<optional scope>): <imperative description>`.
   Keep descriptions lowercase with no trailing period. Use standard types
   such as `feat`, `fix`, `docs`, `refactor`, `test`, `build`, `ci`, and `chore`.
