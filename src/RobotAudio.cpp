@@ -4,8 +4,9 @@
 
 namespace
 {
-constexpr uint8_t kSpeakerVolume = 128;
-constexpr uint8_t kPlaybackChannel = 0;
+  constexpr uint8_t kSpeakerVolume = 255;
+  constexpr uint8_t kSpeakermMagnification = 32;
+  constexpr uint8_t kPlaybackChannel = 0;
 }
 
 RobotAudio::~RobotAudio()
@@ -23,7 +24,6 @@ bool RobotAudio::startRecording()
   stop();
 
   auto config = M5.Mic.config();
-  config.sample_rate = kSampleRate;
   M5.Mic.config(config);
 
   if (!M5.Mic.begin())
@@ -50,6 +50,8 @@ bool RobotAudio::startPlayback()
   // The capture task must release the buffer before the speaker borrows it.
   M5.Mic.end();
   auto config = M5.Speaker.config();
+  config.magnification = 12; // Try 24–48; watch for distortion
+  M5.Speaker.config(config);
   if (config.sample_rate == 0)
   {
     return fail(Error::SPEAKER_START);
@@ -60,17 +62,17 @@ bool RobotAudio::startPlayback()
   // 16-bit samples per 32-bit word (conservative for both output modes).
   const uint64_t tailSamples =
       (static_cast<uint64_t>(config.dma_buf_count) + 1) * config.dma_buf_len * 2;
-  drainDurationMs = (tailSamples * 1000 + config.sample_rate - 1)
-      / config.sample_rate;
+  drainDurationMs = (tailSamples * 1000 + config.sample_rate - 1) / config.sample_rate;
 
   M5.Speaker.setVolume(kSpeakerVolume);
+  M5.Speaker.setAllChannelVolume(kSpeakerVolume);
   if (!M5.Speaker.begin())
   {
     return fail(Error::SPEAKER_START);
   }
 
   if (!M5.Speaker.playRaw(
-      samples, kSampleCount, kSampleRate, false, 1, kPlaybackChannel, false))
+          samples, kSampleCount, kSampleRate, false, 1, kPlaybackChannel, false))
   {
     return fail(Error::PLAY_REQUEST);
   }
