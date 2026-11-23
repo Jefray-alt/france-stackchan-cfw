@@ -75,9 +75,9 @@ role files does not prove that the current session has loaded them.
 - For a testable behavior change, first demonstrate a meaningful failing test
   when practical, then pass it with the implementation. Use focused timing or
   state tests where they add value; do not create tests that mirror the code.
-- There is currently no automated suite or separate lint command. Do not claim
-  those checks pass. Record hardware reproduction/checks when host tests cannot
-  exercise the change.
+- Run `pio test -e native` for controller state/timing tests; see
+  [test/README](test/README) for fixtures and host limitations. There is no
+  separate lint command. Record hardware checks for behavior outside host tests.
 - Validate documentation through paths, links, commands, and consistency.
 - Identify commands that flash hardware. Run uploads only within the user's
   authorized device work; report unperformed hardware checks explicitly.

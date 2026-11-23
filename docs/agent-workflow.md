@@ -75,11 +75,12 @@ The existing build command is:
 pio run -e m5stack-cores3
 ```
 
-Inspect compiler output and, where relevant, memory usage. There is no automated
-suite or lint command configured yet. If adding PlatformIO tests, document the
-runner, target, fixtures, and exact invocation. Some device test commands upload
-test firmware; describe that effect before running them within an authorized
-hardware task. Do not run a test upload as a routine documentation check.
+Inspect compiler output and, where relevant, memory usage. Run the Unity
+controller suite on the host with `pio test -e native`; fixtures and limitations
+are documented in [test/README](../test/README). There is no separate lint
+command. Some device test commands upload test firmware; describe that effect
+before running them within an authorized hardware task. The native suite does
+not upload. Do not run a test upload as a routine documentation check.
 
 Prefer controlled elapsed-time inputs for timing tests where a test seam exists.
 For changes to inactivity, state transitions, or blinking, include boundary

@@ -1,11 +1,40 @@
 
-This directory is intended for PlatformIO Test Runner and project tests.
+Controller tests on the host
+============================
 
-Unit Testing is a software testing method by which individual units of
-source code, sets of one or more MCU program modules together with associated
-control data, usage procedures, and operating procedures, are tested to
-determine whether they are fit for use. Unit testing finds problems early
-in the development cycle.
+Run from the repository root with PlatformIO Core and a host C++ compiler
+(Apple Command Line Tools on macOS):
 
-More information about PlatformIO Unit Testing:
-- https://docs.platformio.org/en/latest/advanced/unit-testing/index.html
+    pio test -e native
+
+For the standard IDE installation, use ~/.platformio/penv/bin/pio instead of
+pio if it is not on PATH. PlatformIO downloads its native platform and Unity
+dependency on the first run. No CoreS3 is needed and this command never uploads.
+
+The test_controller suite uses Unity. setUp() creates a fresh RobotStateMachine
+value for each test; timestamps are explicit uint32_t millisecond values and
+press inputs are individual events, not held-touch levels. No real sleeps or
+hardware mocks are used. The native build_src_filter compiles only the production
+RobotStateMachine.cpp; Arduino main, RobotController, FaceRenderer, and M5Unified
+are excluded. The firmware builds the same helper and supplies millis() and
+M5.Touch.getDetail().wasPressed() at its hardware boundary.
+
+Focused coverage: startup, the full awake state cycle, inactivity just before
+and exactly at 30 seconds, press-driven timer refresh, press precedence at the
+timeout, and no extra cycle without another press event. Each awake state has
+three sleep/wake cycles, checking restoration and the refreshed wake timer.
+Explicit timestamps also cover the inactivity boundary across uint32_t rollover.
+Same-state assignment and repeated begin() semantics are covered too.
+Existing initialization is intentional in this refactor: begin() resets the
+clock to zero without resetting state, so pre-begin uptime counts toward sleep.
+Assigning the current state does not refresh that clock. Validation evidence is
+recorded in docs/plan/controller-unit-tests.md.
+
+Firmware compile check (also no upload):
+
+    pio run -e m5stack-cores3
+
+Native tests establish controller decisions only. Physical touch detection,
+renderer notifications and Serial output, face appearance, and blink recovery
+still need the CoreS3 checklist in docs/agent-workflow.md. A build does not prove
+those behaviors. Neither command above flashes a device.

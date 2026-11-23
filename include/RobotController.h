@@ -1,6 +1,6 @@
 #pragma once
 
-#include "RobotState.h"
+#include "RobotStateMachine.h"
 #include "FaceRenderer.h"
 
 class RobotController
@@ -11,10 +11,9 @@ public:
   void setState(RobotState newState);
 
 private:
-  RobotState state = RobotState::IDLE;
-  RobotState lastState = RobotState::IDLE;
+  RobotStateMachine stateMachine;
   FaceRenderer face;
-  unsigned long lastFaceChangeState = 0;
 
   void handleTouch();
+  void notifyStateChange();
 };
