@@ -17,7 +17,8 @@ git symbolic-ref --quiet --short HEAD
 git rev-parse HEAD
 ```
 
-Record the starting branch, revision, and existing local edits in the plan.
+Record the starting branch, revision, and existing local edits in the plan when
+one is required; otherwise include them in the task brief or handoff.
 Unrelated local modifications do not automatically block work. Identify the
 owned files and preserve all other changes. If the request overlaps an edited
 file, inspect the diff and determine whether the intended work is clear; ask
@@ -32,23 +33,30 @@ task branch before editing rather than leave changes without a branch. Inspect
 state again after branch changes. These checks should protect work, not force
 unnecessary branch switching during an active task.
 
-## Plan one outcome
+## Plan according to scope
 
-Create or update `docs/plan/<task>.md` before implementation. Use the
-[template](plan/template.md) and publish a concise ordered task plan to the user.
-For each task, specify:
+Medium and large code or configuration changes require a focused plan under
+`docs/plan/`, particularly substantive refactors, changes across components, and
+work with significant design decisions or dependencies. Small, isolated changes
+do not require a plan file. Purely documentation changes do not require a plan
+file, regardless of size, unless the user requests one. Briefly state scope,
+checks, and commit intent in the conversation or PR for work without a plan.
+
+When a plan is required, create or update `docs/plan/<task>.md` before
+implementation. Use the [template](plan/template.md) and publish concise ordered
+tasks to the user. For each task, specify:
 
 - Task ID, concrete outcome, scope, and owned files or responsibilities.
 - Dependencies and accepted requirements.
 - Observable acceptance criteria and expected checks.
-- Proposed Conventional Commit, if commits are requested.
+- Proposed Conventional Commit.
 
 Split substantive work into cohesive, independently reviewable tasks. Keep the
 implementation, relevant tests, and docs for each outcome together. A small,
 indivisible change can be one task; say why. Do not add tasks solely to increase
 their count or detail unrelated future features.
 
-Estimate total added and deleted lines across the full plan, including tests
+For planned work, estimate total added and deleted lines, including tests
 and docs. If it appears likely to exceed 1,000 lines and that larger scope is
 not already authorized, propose a smaller outcome before implementation.
 This is a planning guardrail, not a hard implementation cutoff. Revise the plan
@@ -65,9 +73,11 @@ if discovery changes scope or dependencies.
    value and use appropriate inspection, command, or consistency checks.
 5. Run the relevant checks and freeze the candidate for review. Include new
    files, exact commands and exit results, and hardware evidence or gaps.
-6. Resolve review findings before advancing to the next task. Commit each task
-   separately only when authorized; otherwise leave changes uncommitted and
-   retain task boundaries in the plan.
+6. Resolve review findings and commit each completed task separately before
+   advancing. A request to implement a change authorizes its atomic task commits
+   unless the user explicitly requests no commits. Keep task boundaries in the
+   plan when one exists, or in the handoff otherwise. Combine or squash tasks
+   only when the user explicitly requests it.
 
 The existing build command is:
 
@@ -75,11 +85,12 @@ The existing build command is:
 pio run -e m5stack-cores3
 ```
 
-Inspect compiler output and, where relevant, memory usage. There is no automated
-suite or lint command configured yet. If adding PlatformIO tests, document the
-runner, target, fixtures, and exact invocation. Some device test commands upload
-test firmware; describe that effect before running them within an authorized
-hardware task. Do not run a test upload as a routine documentation check.
+Inspect compiler output and, where relevant, memory usage. Run the Unity
+controller suite on the host with `pio test -e native`; fixtures and limitations
+are documented in [test/README](../test/README). There is no separate lint
+command. Some device test commands upload test firmware; describe that effect
+before running them within an authorized hardware task. The native suite does
+not upload. Do not run a test upload as a routine documentation check.
 
 Prefer controlled elapsed-time inputs for timing tests where a test seam exists.
 For changes to inactivity, state transitions, or blinking, include boundary
@@ -134,8 +145,9 @@ Self-review must never be reported as independent review.
 
 ### One task and review pair at a time
 
-- The implementer coordinates the task plan and shared checkout. The main
-  session publishes the ordered plan before workers start.
+- The implementer coordinates the tasks and shared checkout. The main session
+  publishes the ordered plan for medium and large changes, or a brief inline
+  task scope for small changes, before workers start.
 - For each task, use a fresh developer and independent reviewer, then reuse
   that pair for corrections. Workers must not delegate further.
 - Give the developer the task ID, baseline, requirements, acceptance criteria,
@@ -198,7 +210,8 @@ When a file contains unrelated existing edits, stage only the owned changes.
 Confirm no unexpected changes entered the commit. The implementer never pushes;
 the main session may push only when explicitly authorized.
 
-Update the active plan with outcomes, checks, review mode, and limitations.
+Update the active plan with outcomes, checks, review mode, and limitations when
+one is required; otherwise record them in the handoff or PR.
 Update [the roadmap](roadmap.md) only for actual product progress; document
 partial implementation and remaining verification separately. Do not mark a
 feature complete because its code compiles or its documentation was updated.

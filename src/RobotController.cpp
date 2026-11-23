@@ -3,29 +3,15 @@
 void RobotController::begin()
 {
   face.begin();
-  lastFaceChangeState = 0;
+  stateMachine.begin();
 }
 
 void RobotController::setState(RobotState newState)
 {
-  if (state == newState)
+  if (stateMachine.setState(newState, millis()))
   {
-    return;
+    notifyStateChange();
   }
-
-  lastFaceChangeState = millis();
-  state = newState;
-
-  if (state != RobotState::SLEEPING)
-  {
-    lastState = newState;
-  }
-
-  face.setState(state);
-
-  Serial.printf(
-      "Robot state changed: %d\n",
-      static_cast<int>(state));
 }
 
 void RobotController::update()
@@ -37,41 +23,20 @@ void RobotController::update()
 void RobotController::handleTouch()
 {
   auto touch = M5.Touch.getDetail();
+  uint32_t now = millis();
 
-  auto isSleeping = millis() - lastFaceChangeState;
-
-  if (!touch.wasPressed())
+  if (stateMachine.update(touch.wasPressed(), now))
   {
-    if (isSleeping >= 30000 && state != RobotState::SLEEPING)
-    {
-      setState(RobotState::SLEEPING);
-      return;
-    }
-    return;
+    notifyStateChange();
   }
+}
 
-  lastFaceChangeState = 0;
+void RobotController::notifyStateChange()
+{
+  RobotState state = stateMachine.getState();
+  face.setState(state);
 
-  switch (state)
-  {
-  case RobotState::IDLE:
-    setState(RobotState::LISTENING);
-    break;
-
-  case RobotState::LISTENING:
-    setState(RobotState::THINKING);
-    break;
-
-  case RobotState::THINKING:
-    setState(RobotState::SPEAKING);
-    break;
-
-  case RobotState::SPEAKING:
-    setState(RobotState::IDLE);
-    break;
-
-  case RobotState::SLEEPING:
-    setState(lastState);
-    break;
-  }
+  Serial.printf(
+      "Robot state changed: %d\n",
+      static_cast<int>(state));
 }

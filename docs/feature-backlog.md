@@ -4,19 +4,28 @@ This backlog starts from the current firmware. The priority order is proposed,
 not an approved implementation queue. Pick only the outcome requested by the
 user and detail it in a [task plan](plan/template.md).
 
-## Current foundation and verification work
+## Validated foundation
 
-| Priority | Capability | Source status and next evidence |
+The user confirmed the original interactive-face milestone on CoreS3 on
+2026-11-23; see the [validation record](plan/interactive-face-validation.md).
+That evidence predates the controller refactor. Device regression checks on
+the refactored firmware remain pending.
+
+| Original priority | Capability | Status |
 |---|---|---|
-| 1 | Boot and draw the idle face | Implemented in `main.cpp` and `FaceRenderer`; verify startup and rendering on a CoreS3. |
-| 2 | Cycle awake states by touch | Implemented in `RobotController`; verify the order, one transition per press, and continued responsiveness. |
-| 3 | Sleep after inactivity and wake by touch | Logic exists, with local work in progress at migration time; verify timing, previous-state restoration, and repeated sleep/wake cycles before declaring complete. |
-| 4 | Blink while awake | Implemented in `FaceRenderer`; verify the blink cadence, sleeping appearance, and recovery after wake. |
-| 5 | Reproducible regression checks | No automated suite exists. Consider focused state/timing tests when changing that behavior; establish a device smoke-check record. |
+| 1 | Boot and draw the idle face | Complete; previously user-validated on CoreS3. |
+| 2 | Cycle awake states by touch | Complete; previously user-validated on CoreS3. |
+| 3 | Sleep after inactivity and wake by touch | Complete; original fix committed in `3313304` and user-validated. Controller decisions now have native regression coverage. |
+| 4 | Blink while awake | Complete; previously user-validated on CoreS3, including wake recovery. |
 
-Priorities 1-4 are verification targets for existing behavior, not instructions
-to rewrite it. Keep detailed acceptance criteria and any confirmed defects in
-the active task plan.
+## Remaining verification work
+
+| Original priority | Capability | Status and next evidence |
+|---|---|---|
+| 5 | Reproducible regression checks | 15 native Unity controller tests pass; see the [controller test plan](plan/controller-unit-tests.md). Repeat physical touch/display/Serial/sleep/wake/blink checks after the refactor. Renderer/blink logic has no automated coverage. |
+
+Keep detailed acceptance criteria and any confirmed defects in the active task
+plan. No new implementation feature is selected.
 
 ## Later candidates
 
@@ -29,5 +38,5 @@ the active task plan.
 | Dependency version pins | Select known-good versions from a verified build and device check. |
 | Additional boards | Select target hardware and define which capabilities must work there. |
 
-None of the later candidates is a commitment or a prerequisite for this
-documentation migration.
+All six candidates remain unselected; none is a prerequisite for the completed
+interactive-face milestone.

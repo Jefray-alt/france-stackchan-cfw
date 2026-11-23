@@ -10,11 +10,12 @@ candidates.
 
 - `platformio.ini`: board, framework, dependencies, USB flags, and serial speeds.
 - `src/main.cpp`: hardware initialization and the main update loop.
-- `src/RobotController.cpp`: robot state transitions, touch input, and inactivity.
+- `src/RobotController.cpp`: touch input, rendering, and state-change logging.
+- `src/RobotStateMachine.cpp`: hardware-independent state and inactivity decisions.
 - `src/FaceRenderer.cpp`: face drawing and blink timing.
 - `include/`: project headers and the shared `RobotState` enum.
 - `lib/`: project-specific libraries; currently contains a placeholder README.
-- `test/`: reserved for PlatformIO tests; currently contains a placeholder README.
+- `test/`: native Unity controller tests and fixture instructions.
 - `docs/`: planning documents and the development workflow.
 - `.codex/agents/`: implementation coordinator, developer, and reviewer roles.
 
@@ -38,9 +39,10 @@ If `pio` is unavailable in your shell, use the PlatformIO terminal in VS Code.
 For a standard IDE-managed installation, the equivalent executable is
 `~/.platformio/penv/bin/pio`.
 
-The current environment selects `espressif32`, board `m5stack-cores3`, Arduino,
-and `m5stack/M5Unified`. Dependency versions are currently unpinned; record
-resolved versions when investigating differences between machines.
+The default `m5stack-cores3` environment selects `espressif32`, board
+`m5stack-cores3`, Arduino, and `m5stack/M5Unified`. A separate `native` environment
+runs host tests. Dependency versions are currently unpinned; record resolved
+versions when investigating differences between machines.
 
 ### Upload and serial output
 
@@ -72,11 +74,17 @@ in `include/RobotState.h`.
 A successful build checks compilation and linking. Touch, display, sleep,
 wake, and blink behavior also need verification on the physical CoreS3.
 Use the [hardware checklist](docs/agent-workflow.md#hardware-checklist) and
-record what actually ran in the current task plan.
+record what actually ran in the task plan when required, or in the handoff or PR.
 
-No automated test suite or separate lint command is currently configured.
-When tests are introduced, document their fixtures and whether they run on the
-host or device before treating a test command as a required passing check.
+Run deterministic controller tests on the host (requires a C++ compiler):
+
+```sh
+pio test -e native
+```
+
+This uses Unity and compiles the same state helper as the firmware, with no
+device connection or upload. See [test/README](test/README) for fixtures,
+coverage, and hardware limitations. There is no separate lint command.
 
 ## Planning and development workflow
 
@@ -87,7 +95,8 @@ Read [AGENTS.md](AGENTS.md) and the shared
 - [Feature backlog](docs/feature-backlog.md): observed capabilities and proposed work.
 - [Roadmap](docs/roadmap.md): source implementation status and validation gaps.
 - [Task plans](docs/plan/): focused requirements, decisions, tasks, and evidence.
-- [Plan template](docs/plan/template.md): starting point for the next implementation.
+- [Plan template](docs/plan/template.md): for medium and large code/configuration
+  changes. Small changes and documentation-only work do not require a plan file.
 
 ### Development agents
 

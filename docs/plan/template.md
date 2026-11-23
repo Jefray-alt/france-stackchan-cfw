@@ -1,8 +1,10 @@
 # <Specific outcome>
 
-Copy this template to a descriptive lowercase, hyphenated filename under
-`docs/plan/`. Replace placeholders and remove unused sections. This template
-is not an active task.
+Use this template for medium and large code or configuration changes. Small
+changes and purely documentation changes do not require a plan file unless the
+user requests one. When needed, copy it to a descriptive lowercase, hyphenated
+filename under `docs/plan/`. Replace placeholders and remove unused sections.
+This template is not an active task.
 
 **Status:** Planned / in progress / verified / blocked.
 
