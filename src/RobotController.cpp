@@ -10,11 +10,16 @@ void RobotController::setState(RobotState newState)
 {
   if (state == newState)
   {
-    state = RobotState::SLEEPING;
+    return;
   }
 
   lastFaceChangeState = millis();
   state = newState;
+
+  if (state != RobotState::SLEEPING)
+  {
+    lastState = newState;
+  }
 
   face.setState(state);
 
