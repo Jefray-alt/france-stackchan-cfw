@@ -23,18 +23,27 @@ touch/display/Serial/sleep/wake/blink regression observations remain unrecorded.
 
 | Original priority | Capability | Status and next evidence |
 |---|---|---|
-| 5 | Reproducible regression checks | 12 current native tests cover the audio interaction and timing. Audio has user-confirmed hardware validation; detailed per-scenario device results remain unrecorded. See the [audio plan](plan/audio-record-replay.md). |
+| 5 | Reproducible regression checks | 18 controller and 7 protocol native cases cover current transcription decisions, timing and framing. Device transcription and detailed interaction regressions remain pending; see the [transcription plan](plan/tap-to-transcribe.md). |
 
 Keep detailed acceptance criteria and any confirmed defects in the active task
 plan. The selected local two-second record/replay milestone is complete with
 user-confirmed CoreS3 validation; evidence and limits are in the
 [audio validation record](plan/audio-record-replay.md#hardware-validation-follow-up).
 
+## Implemented; device validation pending
+
+Tap-to-transcribe replaces automatic replay with a two-second recording, one
+local Whisper request and a Serial transcript. Host tests, backend tests and
+firmware builds pass. Ten real phrases, microphone quality, cleanup/retry,
+Wi-Fi resource use and disconnected-internet LAN operation remain pending in
+the [approved plan](plan/tap-to-transcribe.md). The earlier audio validation
+remains historical evidence.
+
 ## Later candidates
 
 | Candidate | Decision needed before implementation |
 |---|---|
-| Speech and AI conversation | Choose local versus remote processing, latency expectations, connectivity, and credential handling. |
+| AI conversation after transcription | Choose response generation, audio output, latency and processing boundaries. |
 | Servo movement | Confirm connected hardware, pins, power, and mechanical limits. |
 | Persistent preferences | Define which settings survive reboot and how the user changes them. |
 | Dependency version pins | Select known-good versions from a verified build and device check. |

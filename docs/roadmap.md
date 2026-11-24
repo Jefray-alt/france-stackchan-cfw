@@ -1,6 +1,6 @@
 # Roadmap
 
-Updated on 2026-11-24 for user-confirmed CoreS3 audio validation.
+Updated on 2026-11-24 for implemented tap-to-transcribe with pending device validation.
 This roadmap has no delivery estimates. Future work remains
 subject to the user's priorities.
 
@@ -34,6 +34,24 @@ through hardware validation on CoreS3. The local record/replay milestone is
 complete based on that confirmation; see the
 [validation record](plan/audio-record-replay.md#hardware-validation-follow-up).
 
+## Implemented: tap to transcribe; device validation pending
+
+An idle tap records two seconds and submits one request to the disposable local
+Whisper backend. Thinking remains responsive; a transcript or no-speech message
+prints once, then the robot returns idle. Readiness rejects disconnected taps,
+separate five/30-second watchdogs recover capture/request failures, and pending
+worker ownership prevents buffer reuse after logical timeout. Late IDs are
+discarded; idle sleep and wake-to-idle remain.
+
+All 25 native cases (18 controller, 7 protocol), 28 backend tests and both
+missing/example-configuration firmware builds pass. The earlier T1 local-model
+clip smoke passed with its recorded accuracy limit. No CoreS3 transcription
+upload or validation ran: ten phrases, microphone quality, physical touch,
+Serial/face/blink agreement, repeated sleep/wake, failure cleanup/retry, Wi-Fi
+heap/stack/task stability and LAN operation without external internet remain
+pending. See the [transcription plan](plan/tap-to-transcribe.md) for evidence
+and the hardware checklist. This does not claim the device milestone complete.
+
 ## Remaining verification detail
 
 Device evidence is user-reported. The exact flashed revision, Serial logs,
@@ -51,6 +69,6 @@ confirmation and controller-test results are recorded separately above.
 
 ## Next
 
-No further feature is selected. Choose the next outcome from the
-[backlog](feature-backlog.md) and prepare its own approved plan. Retain the audio
-checklist for regression checks when firmware changes.
+Validate the implemented transcription path on CoreS3 when a device upload is
+authorized. No further feature is selected. Choose later outcomes from the
+[backlog](feature-backlog.md) and prepare their own approved plans.
