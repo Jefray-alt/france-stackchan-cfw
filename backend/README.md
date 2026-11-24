@@ -1,6 +1,6 @@
 # Local transcription test backend
 
-A disposable Node.js 24 service for the CoreS3's two-second recordings. It runs
+A disposable Node.js 24 service for the CoreS3's variable-length recordings. It runs
 local `whisper-cli` once per accepted request. There are no npm packages, API
 keys, remote inference requests, or saved recordings. Setup downloads source
 and model weights; inference works without internet afterward.
@@ -67,9 +67,8 @@ of John F. Kennedy's 1961 inaugural address. The sample ships in the
 [MIT-licensed source](https://github.com/ggml-org/whisper.cpp/blob/d1be6fde11ac6e0407606b4e42fe72d34add8037/LICENSE);
 the federal address recording is identified as public domain in its
 [source and reuse record](https://commons.wikimedia.org/wiki/File:JFK_inaugural_address.ogg).
-The reference phrase begins “And so, my fellow Americans”; the two-second crop
-cuts into the final word. The command below
-extracts exactly those two seconds in memory, validates the sample format and
+The command below extracts the first ten seconds (the capture cap) in memory,
+validates the sample format and
 sends the raw PCM to a running backend. It needs no audio conversion package or
 network download. Set `WHISPER_ROOT` as in setup in this terminal first.
 
@@ -94,32 +93,33 @@ for (let offset = 12; offset + 8 <= wav.length;)
     formatOK = wav.readUInt16LE(data) === 1 && wav.readUInt16LE(data + 2) === 1 &&
       wav.readUInt32LE(data + 4) === 16000 && wav.readUInt16LE(data + 14) === 16;
   }
-  if (name === 'data') pcm = wav.subarray(data, data + size).subarray(0, 64000);
+  if (name === 'data') pcm = wav.subarray(data, data + size).subarray(0, 320000);
   offset = data + size + (size % 2);
 }
-assert.ok(formatOK && pcm?.length === 64000);
+assert.ok(formatOK && pcm?.length === 320000);
 const started = performance.now();
 const response = await fetch('http://127.0.0.1:3000/v1/transcriptions', {
   method: 'POST', headers: { 'Content-Type': 'application/octet-stream',
-    'Content-Length': String(pcm.length) }, body: pcm, signal: AbortSignal.timeout(25000)
+    'Content-Length': String(pcm.length) }, body: pcm, signal: AbortSignal.timeout(30000)
 });
 const text = await response.text();
 console.log({ status: response.status, text, elapsedMs: Math.round(performance.now() - started) });
 assert.equal(response.status, 200);
-assert.match(text, /and so.*my fellow america/i);
+assert.match(text, /my fellow Americans.*ask not what your country can do for you.*ask what you can do for your country/i);
 JS
 ```
 
 Each request includes model loading. Measure on your own computer against the
-20-second deadline; changing model or language leaves the device contract
-unchanged. The fixture checks a recognizable prefix of one phrase, allowing its cut-off
-ending. The first measured result was “And so my fellow America” in 6,156 ms;
-the initial whole-word `Americans` assertion failed. This is a real recognition
-limitation of the short crop, not an exact-transcription pass. It does not establish
-CoreS3 microphone quality, broad transcription accuracy or speech detection.
-Whisper can hallucinate text for silence/noise; no VAD is included. An empty
-successful transcript is valid. See the [implementation plan](../docs/plan/tap-to-transcribe.md)
-for observed recognition and remaining device checks.
+five-second body, 20-second inference, and 30-second firmware request deadlines.
+The ten-second fixture returned HTTP 200 in 370 ms on the development computer,
+including “ask not what your country can do for you, ask what you can do for
+your country.” The earlier two-second crop cut into “Americans”; the longer
+fixture checks words beyond that old cutoff. This checks local inference and
+HTTP handling, with no CoreS3 microphone, Wi-Fi, energy detection, or broad
+accuracy claim. Whisper can hallucinate text for silence/noise; the backend has
+no speech detector. An empty successful transcript is valid. See the
+[silence-stop plan](../docs/plan/speech-silence-stop.md) for evidence and device
+checks.
 
 ## CoreS3 and replacement contract
 
@@ -130,18 +130,19 @@ LAN IPv4 address as the firmware backend base URL, for example
 the computer. This testing service uses plain HTTP on a trusted LAN and has no
 public hosting or authentication scope. Audio stays on the device/computer path.
 
-A replacement service only needs the following contract and an updated device
+Update this backend before installing the silence-stop firmware. Legacy
+64,000-byte requests remain valid. A replacement service only needs the following contract and an updated device
 base URL; Whisper flags and local paths never reach the device:
 
 | Request/response | Contract |
 | --- | --- |
 | Endpoint | `POST /v1/transcriptions` |
 | Request media | `Content-Type: application/octet-stream` |
-| Request body | Exactly 64,000 bytes; signed 16-bit little-endian mono PCM, 16 kHz |
-| Request framing | Matching `Content-Length: 64000`; no chunking or multipart |
+| Request body | An even 3,840–320,000 bytes inclusive; signed 16-bit little-endian mono PCM, 16 kHz |
+| Request framing | Matching `Content-Length`; no transfer/content encoding or multipart |
 | Success | 200, `Content-Type: text/plain; charset=utf-8`, explicit byte `Content-Length` |
 | Success body | Trimmed UTF-8 transcript, at most 2,048 bytes; empty is valid |
-| Invalid length/body | 400 (including a five-second body receipt deadline) |
+| Invalid length/framing/body | 400 (including odd/undersized lengths, incomplete bodies and a five-second body receipt deadline) |
 | Oversized input | 413 |
 | Unsupported media | 415 |
 | Busy/shutting down | 503; one admitted request, no queue or retry |

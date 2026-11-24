@@ -36,21 +36,23 @@ complete based on that confirmation; see the
 
 ## Implemented: tap to transcribe; device validation pending
 
-An idle tap records two seconds and submits one request to the disposable local
-Whisper backend. Thinking remains responsive; a transcript or no-speech message
-prints once, then the robot returns idle. Readiness rejects disconnected taps,
-separate five/30-second watchdogs recover capture/request failures, and pending
+An idle tap records until sustained silence or a ten-second cap and submits
+one variable-length request to the disposable local Whisper backend. Quiet or
+brief-noise captures return idle without uploading. Thinking remains responsive;
+a transcript or no-speech message prints once, then the robot returns idle. Readiness rejects disconnected taps,
+separate 11/30-second watchdogs recover capture/request failures, and pending
 worker ownership prevents buffer reuse after logical timeout. Late IDs are
 discarded; idle sleep and wake-to-idle remain.
 
-All 25 native cases (18 controller, 7 protocol), 28 backend tests and both
-missing/example-configuration firmware builds pass. The earlier T1 local-model
-clip smoke passed with its recorded accuracy limit. No CoreS3 transcription
-upload or validation ran: ten phrases, microphone quality, physical touch,
+All 34 native cases (19 controller, 8 audio, 7 protocol), 33 backend tests and both
+missing/example-configuration firmware builds pass. A real ten-second
+local-model clip returned HTTP 200 with words beyond the old two-second cutoff.
+No CoreS3 transcription upload or validation ran: ten phrases, microphone quality, physical touch,
 Serial/face/blink agreement, repeated sleep/wake, failure cleanup/retry, Wi-Fi
 heap/stack/task stability and LAN operation without external internet remain
-pending. See the [transcription plan](plan/tap-to-transcribe.md) for evidence
-and the hardware checklist. This does not claim the device milestone complete.
+pending. See the [silence-stop](plan/speech-silence-stop.md) and
+[transcription](plan/tap-to-transcribe.md) plans for evidence and the hardware
+checklist. This does not claim the device milestone complete.
 
 ## Remaining verification detail
 

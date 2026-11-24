@@ -19,10 +19,12 @@ The repository contains Arduino firmware that draws a face, changes its visual
 state on touch, animates blinking, and implements inactivity-based sleep and
 wake logic. The user confirmed the original milestone on CoreS3; evidence and
 limitations are in the [validation record](plan/interactive-face-validation.md).
-The current idle tap records two seconds, waits in thinking, prints the local
+The current idle tap records until a sustained pause or a ten-second cap,
+waits in thinking, prints the local
 Whisper transcript once in Serial, and returns idle. Host state/protocol tests,
 backend tests and firmware builds pass; the
-[transcription plan](plan/tap-to-transcribe.md) records pending CoreS3 checks.
+[transcription plan](plan/tap-to-transcribe.md) and
+[silence-stop plan](plan/speech-silence-stop.md) record pending CoreS3 checks.
 Earlier automatic audio replay has user-confirmed validation on 2026-11-24;
 see the [historical audio record](plan/audio-record-replay.md#hardware-validation-follow-up).
 Current host coverage and pending device checks belong in the [roadmap](roadmap.md).

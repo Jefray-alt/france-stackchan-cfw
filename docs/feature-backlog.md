@@ -23,7 +23,7 @@ touch/display/Serial/sleep/wake/blink regression observations remain unrecorded.
 
 | Original priority | Capability | Status and next evidence |
 |---|---|---|
-| 5 | Reproducible regression checks | 18 controller and 7 protocol native cases cover current transcription decisions, timing and framing. Device transcription and detailed interaction regressions remain pending; see the [transcription plan](plan/tap-to-transcribe.md). |
+| 5 | Reproducible regression checks | 19 controller, 8 audio and 7 protocol native cases cover current transcription decisions, timing and framing. Device transcription and detailed interaction regressions remain pending; see the [transcription plan](plan/tap-to-transcribe.md). |
 
 Keep detailed acceptance criteria and any confirmed defects in the active task
 plan. The selected local two-second record/replay milestone is complete with
@@ -32,11 +32,12 @@ user-confirmed CoreS3 validation; evidence and limits are in the
 
 ## Implemented; device validation pending
 
-Tap-to-transcribe replaces automatic replay with a two-second recording, one
-local Whisper request and a Serial transcript. Host tests, backend tests and
+Tap-to-transcribe replaces automatic replay with a recording that ends after
+silence (up to ten seconds), one local Whisper request and a Serial transcript. Host tests, backend tests and
 firmware builds pass. Ten real phrases, microphone quality, cleanup/retry,
 Wi-Fi resource use and disconnected-internet LAN operation remain pending in
-the [approved plan](plan/tap-to-transcribe.md). The earlier audio validation
+the [transcription](plan/tap-to-transcribe.md) and
+[silence-stop](plan/speech-silence-stop.md) plans. The earlier audio validation
 remains historical evidence.
 
 ## Later candidates

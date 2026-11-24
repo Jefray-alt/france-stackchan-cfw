@@ -1,5 +1,6 @@
 #pragma once
 
+#include <atomic>
 #include <cstddef>
 #include <cstdint>
 
@@ -14,6 +15,7 @@ public:
     IDLE,
     RECORDING,
     RECORDED,
+    NO_SPEECH,
     PLAYING,
     COMPLETE,
     FAILED
@@ -22,6 +24,7 @@ public:
   enum class Error
   {
     NONE,
+    BUFFER_ALLOCATION,
     MICROPHONE_START,
     RECORD_REQUEST,
     MICROPHONE_STOPPED,
@@ -31,7 +34,13 @@ public:
   };
 
   static constexpr uint32_t kSampleRate = 16000;
-  static constexpr size_t kSampleCount = 32000;
+  static constexpr size_t kMaxSampleCount = 160000;
+  static constexpr size_t kFrameSamples = 320; // 20 ms at 16 kHz.
+  static constexpr size_t kInitialSilenceSamples = 48000; // 3 seconds.
+  static constexpr size_t kHangoverSamples = 12800; // 800 ms.
+  static constexpr size_t kMinimumActivitySamples = 1920; // 120 ms.
+  // Mean absolute PCM amplitude. Initial setting; tune on CoreS3.
+  static constexpr uint32_t kActivityThreshold = 500;
 
   struct Clip
   {
@@ -65,10 +74,22 @@ private:
   bool borrowCompletedClip(Clip& clip);
   void releaseCompletedClip();
 
-  static_assert(kSampleCount * sizeof(int16_t) == 64000,
-      "The reusable clip must hold two seconds of 16-bit mono PCM");
+  static_assert(kMaxSampleCount * sizeof(int16_t) == 320000,
+      "The reusable PSRAM clip holds ten seconds of 16-bit mono PCM");
+  static_assert(kMaxSampleCount % kFrameSamples == 0, "The cap ends on a frame");
 
-  int16_t samples[kSampleCount];
+  int16_t* samples = nullptr;
+  size_t sampleCount = 0;
+  size_t processedSamples = 0;
+  size_t activitySamples = 0;
+  size_t silentSamples = 0;
+  // Capture-task producer, main-task consumer. Samples below this release
+  // watermark are immutable until end() joins the capture task.
+  std::atomic<size_t> completedSamples{0};
+  std::atomic<bool> captureStopping{true};
+  std::atomic<bool> captureStarting{false};
+  std::atomic<bool> refillFailed{false};
+  size_t nextQueuedSample = 0; // Capture-task only after initial admission.
   Status currentStatus = Status::IDLE;
   Error currentError = Error::NONE;
   bool clipBorrowed = false;
@@ -76,6 +97,8 @@ private:
   uint32_t drainStartedAt = 0;
   uint32_t drainDurationMs = 0;
 
+  static void bufferReleased(void* context, void* data, size_t count);
+  void processRecording();
   void releaseHardware();
   bool fail(Error error);
 };

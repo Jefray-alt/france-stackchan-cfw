@@ -85,6 +85,7 @@ struct RobotTranscription::Runtime
   struct Request
   {
     const int16_t* samples;
+    size_t sampleCount;
     uint32_t requestId;
     uint32_t submittedAt;
   };
@@ -186,7 +187,13 @@ RobotTranscription::Error RobotTranscription::submit(RobotAudio& audio, uint32_t
   {
     return Error::INVALID_CLIP;
   }
-  const Runtime::Request request{clip.samples, requestId, millis()};
+  if (!clip.samples || clip.sampleCount < RobotAudio::kMinimumActivitySamples
+      || clip.sampleCount > RobotAudio::kMaxSampleCount)
+  {
+    audio.releaseCompletedClip();
+    return Error::INVALID_CLIP;
+  }
+  const Runtime::Request request{clip.samples, clip.sampleCount, requestId, millis()};
   if (xQueueSend(runtime->requests, &request, 0) != pdTRUE)
   {
     audio.releaseCompletedClip();
@@ -337,20 +344,20 @@ RobotTranscription::Error RobotTranscription::Runtime::exchange(
     pauseWorker();
   }
 
+  const size_t pcmBytes = request.sampleCount * sizeof(int16_t);
   char header[256];
   const int headerLength = std::snprintf(header, sizeof(header),
       "POST /v1/transcriptions HTTP/1.1\r\nHost: %u.%u.%u.%u:%u\r\n"
-      "Content-Type: application/octet-stream\r\nContent-Length: 64000\r\n"
-      "Connection: close\r\n\r\n", ip[0], ip[1], ip[2], ip[3], endpoint.port);
+      "Content-Type: application/octet-stream\r\nContent-Length: %u\r\n"
+      "Connection: close\r\n\r\n", ip[0], ip[1], ip[2], ip[3], endpoint.port,
+      static_cast<unsigned>(pcmBytes));
   if (headerLength <= 0 || static_cast<size_t>(headerLength) >= sizeof(header))
   {
     return Error::IO_FAILED;
   }
-  static_assert(RobotAudio::kSampleCount * sizeof(int16_t) == 64000,
-      "The endpoint requires one complete fixed-size recording");
   const uint8_t* parts[] = {reinterpret_cast<const uint8_t*>(header),
       reinterpret_cast<const uint8_t*>(request.samples)};
-  const size_t lengths[] = {static_cast<size_t>(headerLength), 64000};
+  const size_t lengths[] = {static_cast<size_t>(headerLength), pcmBytes};
   uint32_t lastProgress = millis();
   for (unsigned part = 0; part < 2; ++part)
   {

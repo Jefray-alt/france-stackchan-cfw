@@ -114,7 +114,7 @@ void RobotController::applyDecision(bool stateChanged,
   }
   else if (stateMachine.actions().completion == RobotStateMachine::Completion::NO_SPEECH)
   {
-    Serial.println("No speech transcribed");
+    Serial.println("No speech detected");
   }
 
   if (stateChanged)

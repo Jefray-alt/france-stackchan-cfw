@@ -3,8 +3,8 @@
 Custom firmware for an M5Stack CoreS3, built with PlatformIO, the Arduino
 framework, and M5Unified. The current source implements a touch-driven face
 with idle, listening, thinking, and sleeping interaction states. An idle tap
-records two seconds and sends the clip to a disposable local Whisper backend;
-the returned transcript appears once in Serial. This path is implemented with
+records until a sustained pause (at most ten seconds) and sends the clip to a
+disposable local Whisper backend; the returned transcript appears once in Serial. This path is implemented with
 host tests and firmware builds; CoreS3 transcription validation is pending.
 Earlier local audio record/replay was user-validated on 2026-11-24.
 
@@ -14,7 +14,7 @@ Earlier local audio record/replay was user-validated on 2026-11-24.
 - `src/main.cpp`: hardware initialization and the main update loop.
 - `src/RobotController.cpp`: touch input, rendering, and state-change logging.
 - `src/RobotStateMachine.cpp`: hardware-independent state and inactivity decisions.
-- `src/RobotAudio.cpp`: fixed PCM buffer and exclusive microphone/speaker lifecycle.
+- `src/RobotAudio.cpp`: reusable PSRAM PCM buffer and exclusive microphone/speaker lifecycle.
 - `src/RobotTranscription.cpp`: bounded Wi-Fi/socket worker and clip/result handoff.
 - `src/TranscriptionProtocol.cpp`: fixed-size HTTP framing and UTF-8 validation.
 - `src/FaceRenderer.cpp`: face drawing and blink timing.
@@ -46,8 +46,10 @@ For a standard IDE-managed installation, the equivalent executable is
 
 The default `m5stack-cores3` environment selects `espressif32`, board
 `m5stack-cores3`, Arduino, and `m5stack/M5Unified`. A separate `native` environment
-runs host tests. Dependency versions are currently unpinned; record resolved
-versions when investigating differences between machines.
+runs host tests. M5Unified is pinned to 0.3.0 for its microphone buffer-release
+callback.
+Other dependency versions remain unpinned; record resolved versions when
+investigating differences between machines.
 
 ### Upload and serial output
 
@@ -76,22 +78,33 @@ in `include/RobotState.h`.
 
 ### Tap to transcribe
 
-Start the local backend and configure Wi-Fi as below. Tap while idle, then speak
-a short phrase during the two-second, 16 kHz mono capture. The listening face
-changes to thinking while one request is processed. Success prints
-`Transcript: <text>` once, preserving UTF-8 bytes, then returns idle. An empty
-successful result prints `No speech transcribed`. There is no speaking phase or
-automatic replay in this interaction; the existing playback transport remains
-available in the source. No VAD, longer capture, AI response or generated audio
-is included. Whisper can produce text from silence/noise, so an empty-result
-message does not establish reliable speech detection.
+Update the [local backend](backend/README.md) before using this firmware; the
+new service still accepts the earlier 64,000-byte recordings. Configure Wi-Fi
+as below. Tap while idle, then speak during the 16 kHz mono capture. Start
+within three seconds. A pause shorter than 800 ms keeps the clip open; 800 ms
+of silence ends it. Continuous sound stops at exactly ten seconds. Leading
+and trailing audio through the stop frame are retained.
+
+The listening face changes to thinking while one request is processed. Success
+prints `Transcript: <text>` once, preserving UTF-8 bytes, then returns idle.
+A quiet tap, less than 120 ms of detected activity, or an empty transcript
+prints `No speech detected` once. Quiet/noise captures below that minimum
+return idle without uploading. There is no automatic replay; the retained
+playback API uses the same finalized clip length.
+
+Detection uses mean absolute energy on 20 ms frames, initially a threshold of
+500 PCM units. The threshold and sample-based windows are tunable in
+`include/RobotAudio.h` and need CoreS3 checks with ordinary/quiet speech and room
+noise. This energy gate cannot reliably distinguish speech from steady noise;
+Whisper can also produce text from noise. AI response and generated audio
+remain later work.
 
 Busy presses and held touches do not queue recordings. After 30 seconds idle,
 the face sleeps; a sleeping press wakes to idle, and the next distinct press
 records. Completion and failure refresh inactivity. A disconnected or
 unconfigured idle press prints a diagnostic without capturing audio for later.
-Capture has a five-second watchdog and transcription has a separate 30-second
-watchdog. Failures print one diagnostic and return idle. After a request timeout,
+Capture has an 11-second watchdog from the start of listening. Transcription
+has a separate 30-second watchdog. Failures print one diagnostic and return idle. After a request timeout,
 new recordings remain blocked until the worker acknowledges socket cleanup;
 late transcripts are discarded. Retry with a fresh press after cleanup and
 connectivity recovery. M5Unified driver cleanup and SDK socket close may wait
@@ -124,8 +137,9 @@ reports it as unconfigured, and face/sleep/wake remain usable.
 One persistent worker schedules Wi-Fi attempts every ten seconds without
 waiting for association in the main loop. A disconnected submission fails
 immediately. There is one request and one result slot; the worker borrows the
-existing 64,000-byte PCM buffer instead of copying it. The
-main task keeps polling results even after an interaction times out: only an
+reusable 320,000-byte PSRAM PCM buffer instead of copying it, passing only
+the actual finalized sample count. Allocation failure returns idle without
+uploading. The main task keeps polling results even after an interaction times out: only an
 acknowledgment after socket close releases the clip for a new recording.
 Request IDs reject stale results, and explicit UTF-8 byte lengths preserve
 embedded NUL in Serial output.
@@ -147,7 +161,8 @@ worker has released the clip.
 
 A successful build checks compilation and linking. Touch, display, sleep,
 wake, and blink behavior also need verification on the physical CoreS3.
-Use the [transcription checklist](docs/plan/tap-to-transcribe.md#t3-connect-tap-recording-to-transcript-results)
+Use the [silence-stop checklist](docs/plan/speech-silence-stop.md) and
+[transcription checklist](docs/plan/tap-to-transcribe.md#t3-connect-tap-recording-to-transcript-results)
 for ten real phrases, microphone quality, failure/cleanup/retry, repeated
 sleep/wake and blinking, Wi-Fi heap/stack/task headroom, and LAN operation with
 external internet disconnected. These checks remain pending; the earlier
