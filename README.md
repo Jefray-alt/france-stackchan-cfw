@@ -4,8 +4,9 @@ Custom firmware for an M5Stack CoreS3, built with PlatformIO, the Arduino
 framework, and M5Unified. The current source implements a touch-driven face
 with idle, listening, thinking, and sleeping interaction states. An idle tap
 records until a sustained pause (at most ten seconds) and sends the clip to a
-disposable local Whisper backend; the returned transcript appears once in Serial. This path is implemented with
-host tests and firmware builds; CoreS3 transcription validation is pending.
+disposable local Whisper backend. The returned transcript appears once in Serial.
+The user confirmed tap-to-transcribe works on CoreS3 on 2026-11-24. See the
+[device confirmation](docs/plan/speech-silence-stop.md#cores3-validation-follow-up).
 Earlier local audio record/replay was user-validated on 2026-11-24.
 
 ## Repository
@@ -94,12 +95,11 @@ prints `No speech detected` once. Quiet/noise captures below that minimum
 return idle without uploading. There is no automatic replay; the retained
 playback API uses the same finalized clip length.
 
-Detection uses mean absolute energy on 20 ms frames, initially a threshold of
+Detection uses mean absolute energy on 20 ms frames with a threshold of
 100 PCM units. The threshold and sample-based windows are tunable in
-`include/RobotAudio.h` and need CoreS3 checks with ordinary/quiet speech and room
-noise. This energy gate cannot reliably distinguish speech from steady noise;
-Whisper can also produce text from noise. AI response and generated audio
-remain later work.
+`include/RobotAudio.h`. Detailed tuning observations for quiet speech and room
+noise remain unrecorded. Steady noise can keep the energy gate open, and Whisper
+can produce text from noise. AI response and generated audio remain later work.
 
 Busy presses and held touches do not queue recordings. After 30 seconds idle,
 the face sleeps; a sleeping press wakes to idle, and the next distinct press
@@ -154,22 +154,17 @@ and 255 bytes per line; successful plain UTF-8 text is limited to 2,048 bytes,
 with explicit Content-Length and no transfer/content encoding. Socket close
 finishes before result publication. The installed SDK disables SO_LINGER;
 close can wait beyond the 30-second interaction deadline. An exceptional close
-failure keeps the worker and clip occupied while it retries cleanup. Actual
-SDK latency, worker stack/heap headroom, Wi-Fi behavior and repeated requests
-still require CoreS3 checks. A logical timeout does not establish that the
-worker has released the clip.
+failure keeps the worker and clip occupied while it retries cleanup.
 
 ### Verification
 
-A successful build checks compilation and linking. Touch, display, sleep,
-wake, and blink behavior also need verification on the physical CoreS3.
-Use the [silence-stop checklist](docs/plan/speech-silence-stop.md) and
+A successful build checks compilation and linking. The
+[CoreS3 confirmation](docs/plan/speech-silence-stop.md#cores3-validation-follow-up)
+records the user-reported device result. The
 [transcription checklist](docs/plan/tap-to-transcribe.md#t3-connect-tap-recording-to-transcript-results)
-for ten real phrases, microphone quality, failure/cleanup/retry, repeated
-sleep/wake and blinking, Wi-Fi heap/stack/task headroom, and LAN operation with
-external internet disconnected. These checks remain pending; the earlier
-[audio validation](docs/plan/audio-record-replay.md#hardware-validation-follow-up)
-is historical evidence for record/replay, not this transcription path.
+covers detailed regression checks for microphone quality, failure recovery,
+sleep/wake and blinking, Wi-Fi resource use, and LAN operation with external
+internet disconnected.
 
 Run deterministic controller tests on the host (requires a C++ compiler):
 

@@ -23,22 +23,19 @@ touch/display/Serial/sleep/wake/blink regression observations remain unrecorded.
 
 | Original priority | Capability | Status and next evidence |
 |---|---|---|
-| 5 | Reproducible regression checks | 19 controller, 8 audio and 7 protocol native cases cover current transcription decisions, timing and framing. Device transcription and detailed interaction regressions remain pending; see the [transcription plan](plan/tap-to-transcribe.md). |
+| 5 | Reproducible regression checks | 19 controller, 8 audio and 7 protocol native cases cover current transcription decisions, timing and framing. Detailed device interaction scenarios are listed in the [transcription checklist](plan/tap-to-transcribe.md#t3-connect-tap-recording-to-transcript-results). |
 
 Keep detailed acceptance criteria and any confirmed defects in the active task
 plan. The selected local two-second record/replay milestone is complete with
 user-confirmed CoreS3 validation; evidence and limits are in the
 [audio validation record](plan/audio-record-replay.md#hardware-validation-follow-up).
 
-## Implemented; device validation pending
+## Completed: tap to transcribe with silence-stop
 
-Tap-to-transcribe replaces automatic replay with a recording that ends after
-silence (up to ten seconds), one local Whisper request and a Serial transcript. Host tests, backend tests and
-firmware builds pass. Ten real phrases, microphone quality, cleanup/retry,
-Wi-Fi resource use and disconnected-internet LAN operation remain pending in
-the [transcription](plan/tap-to-transcribe.md) and
-[silence-stop](plan/speech-silence-stop.md) plans. The earlier audio validation
-remains historical evidence.
+Tap-to-transcribe with silence-stop records up to ten seconds, sends one local
+Whisper request, and prints the transcript in Serial. The user confirmed it
+works on CoreS3 on 2026-11-24. See the
+[device confirmation](plan/speech-silence-stop.md#cores3-validation-follow-up).
 
 ## Later candidates
 

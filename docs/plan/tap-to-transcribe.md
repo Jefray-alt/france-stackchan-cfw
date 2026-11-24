@@ -1,7 +1,9 @@
 # Tap to transcribe with a disposable local backend
 
 **Status:** Implementation complete; all three tasks independently reviewed and
-committed. CoreS3 transcription validation remains pending.
+committed. This plan records the original two-second implementation. For the
+later user-confirmed device result, see the
+[CoreS3 validation follow-up](speech-silence-stop.md#cores3-validation-follow-up).
 
 **Outcome:** Tap the CoreS3, speak a short phrase during its two-second capture,
 and read the returned transcript in Serial while the face remains responsive.

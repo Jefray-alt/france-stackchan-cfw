@@ -54,7 +54,9 @@ HTTP rejection/redirects, incomplete bodies, malformed or ambiguous framing,
 media/encoding rejection, fixed header/line/body limits, canary-protected output,
 and invalid/overlong/surrogate/out-of-range UTF-8. It does not establish socket
 cleanup, task allocation, clip ownership under real concurrency, Wi-Fi memory
-use or device timing. Those remain CoreS3 checks in the tap-to-transcribe plan.
+use or device timing. See the tap-to-transcribe plan for the device checklist
+and docs/plan/speech-silence-stop.md#cores3-validation-follow-up for the
+user-reported result.
 
 Firmware compile check (also no upload):
 

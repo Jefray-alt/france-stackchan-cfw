@@ -1,7 +1,8 @@
 # Record speech beyond two seconds
 
 **Status:** Five-second pause test/docs follow-up passed independent review.
-CoreS3 validation remains pending.
+The user confirmed tap-to-transcribe works on CoreS3 on 2026-11-24. See the
+[device confirmation](#cores3-validation-follow-up).
 
 The original implementation record below describes commit `ddb6132`, including
 its historical 800 ms pause and 500-unit threshold evidence. Current production
@@ -24,8 +25,8 @@ ends the clip, with a 10-second safety cap on capture.
 - Approval: On 2026-11-24, after receiving the revised plan, the user said
   “Move to a new branch and worktree and implement this”. The request approves
   the revised plan and its task commit. Device upload remains pending approval.
-- The [tap-to-transcribe baseline](tap-to-transcribe.md) still has pending
-  CoreS3 validation. Verify the full tap-to-transcript path on the new firmware.
+- The [tap-to-transcribe baseline](tap-to-transcribe.md) originally left device
+  checks for a later session. See the [device confirmation](#cores3-validation-follow-up).
 - In scope: CoreS3 audio capture and silence-stop behavior, variable-length clip
   handoff to the retained playback API and transcription, the local backend's
   request contract, and focused checks and docs.
@@ -126,8 +127,8 @@ Repeated taps after completion or failure work, and the face remains responsive.
 
 **Status and evidence:** Implemented in the approved isolated worktree. Native
 sample/state tests, backend tests, real local-model maximum-clip smoke, and
-missing/placeholder-configuration firmware builds pass. Hardware checks remain
-pending; no device upload ran. Independent review round 1 passed. The
+missing/placeholder-configuration firmware builds passed. At the initial
+handoff, device checks were pending. Independent review round 1 passed. The
 authorized task commit follows the review.
 
 **Implementation:** Two 320-sample microphone requests stay queued, with the
@@ -203,11 +204,11 @@ loop sources are unchanged. Dependencies introduce no new library.
     were POSTed. Exit 0, HTTP 200 in 370 ms. Transcript: “And so my fellow
     Americans, ask not what your country can do for you, ask what you can do
     for your country.” An assertion on both later clauses passed. This is a
-    local backend/model check. CoreS3 capture and Wi-Fi validation remain pending. The public
-    maximum-clip command is in [backend/README](../../backend/README.md#offline-recognition-smoke-test).
+    local backend/model check. The public maximum-clip command is in
+    [backend/README](../../backend/README.md#offline-recognition-smoke-test).
   - `git diff --check`: exit 0. Owned new files also checked directly for
     whitespace; local Markdown paths/anchors and updated contract checked.
-- Hardware: no CoreS3 capture or upload was performed or authorized. Pending:
+- Hardware checklist at the original handoff:
   uninterrupted phrase after two seconds, ordinary/quiet speech and room-noise
   threshold tuning, delayed onset, short pauses, quiet tap, continuous sound to
   the cap, repeated capture/upload with Wi-Fi, PSRAM/stack/heap headroom,
@@ -226,9 +227,8 @@ loop sources are unchanged. Dependencies introduce no new library.
   contains this plan, firmware, backend, tests, and matching docs.
 - The original checkout retains its untracked plan draft on `main`. The isolated
   `feat/speech-silence-stop` worktree contains the task.
-- Device validation remains pending. Capture uses an initial energy threshold
-  of 500 PCM units and the approved timing settings, all of which need CoreS3
-  observations. Update the backend before using the firmware.
+- The initial handoff had a 500-unit energy threshold. See the [five-second
+  pause follow-up](#approved-five-second-pause-follow-up) for later settings.
 - No device upload or push was performed.
 
 
@@ -283,8 +283,14 @@ loop sources are unchanged. Dependencies introduce no new library.
 - Handoff: T1 is complete for the atomic commit
   `test(audio): align coverage with five-second pauses`. The main session
   owns the branch push and PR update.
-- Hardware: No upload or hardware checks performed. Pending CoreS3 validation:
+- Hardware scenarios identified during the test/docs follow-up:
   five-second pauses where the cap permits, cap-shortened waits, ordinary/quiet
   speech and room noise at threshold 100, repeated capture/upload, and actual
-  microphone continuity/ownership. Passing fixtures and compilation do not
-  establish these device behaviors.
+  microphone continuity/ownership.
+
+## CoreS3 validation follow-up
+
+On 2026-11-24, the user confirmed that tap-to-transcribe with silence-stop works
+on their CoreS3. The exact flashed revision, per-scenario results, and device
+measurements remain unrecorded. The [original device checklist](tap-to-transcribe.md#t3-connect-tap-recording-to-transcript-results)
+describes detailed regression scenarios.
