@@ -1,6 +1,6 @@
 # Roadmap
 
-Updated on 2026-11-24 for implemented tap-to-transcribe with pending device validation.
+Updated on 2026-11-24 to record user-confirmed tap-to-transcribe on CoreS3.
 This roadmap has no delivery estimates. Future work remains
 subject to the user's priorities.
 
@@ -34,31 +34,29 @@ through hardware validation on CoreS3. The local record/replay milestone is
 complete based on that confirmation; see the
 [validation record](plan/audio-record-replay.md#hardware-validation-follow-up).
 
-## Implemented: tap to transcribe; device validation pending
+## Completed: tap to transcribe with silence-stop
 
-An idle tap records two seconds and submits one request to the disposable local
-Whisper backend. Thinking remains responsive; a transcript or no-speech message
-prints once, then the robot returns idle. Readiness rejects disconnected taps,
-separate five/30-second watchdogs recover capture/request failures, and pending
-worker ownership prevents buffer reuse after logical timeout. Late IDs are
-discarded; idle sleep and wake-to-idle remain.
+An idle tap records until sustained silence or a ten-second cap and submits
+one variable-length request to the disposable local Whisper backend. Quiet or
+brief-noise captures return idle without uploading. Thinking remains responsive.
+A transcript or no-speech message prints once, then the robot returns idle.
+Readiness rejects disconnected taps. Separate 11/30-second watchdogs recover
+capture/request failures. Worker ownership prevents buffer reuse after a logical
+timeout. The controller discards late results by request ID and handles idle
+sleep and wake-to-idle.
 
-All 25 native cases (18 controller, 7 protocol), 28 backend tests and both
-missing/example-configuration firmware builds pass. The earlier T1 local-model
-clip smoke passed with its recorded accuracy limit. No CoreS3 transcription
-upload or validation ran: ten phrases, microphone quality, physical touch,
-Serial/face/blink agreement, repeated sleep/wake, failure cleanup/retry, Wi-Fi
-heap/stack/task stability and LAN operation without external internet remain
-pending. See the [transcription plan](plan/tap-to-transcribe.md) for evidence
-and the hardware checklist. This does not claim the device milestone complete.
+The user confirmed the flow works on CoreS3 on 2026-11-24. All 34 native cases
+(19 controller, 8 audio, 7 protocol) and the firmware build passed for the
+five-second pause settings. Earlier backend validation passed 33 tests, and a
+real ten-second local-model request returned words beyond the old two-second
+cutoff. See the [CoreS3 confirmation and automated evidence](plan/speech-silence-stop.md#cores3-validation-follow-up).
 
 ## Remaining verification detail
 
 Device evidence is user-reported. The exact flashed revision, Serial logs,
-cycle counts, and individual results for clip tails, busy touches, sleep/wake,
-blink recovery, and driver cleanup were not supplied. The earlier third-attempt
-playback issue has no confirmed diagnosis in this record. No assistant-operated
-device check or firmware upload was performed for this documentation update.
+cycle counts, and per-scenario results for clip tails, busy touches, sleep/wake,
+blink recovery, and driver cleanup remain unrecorded. The earlier third-attempt
+playback issue has no confirmed diagnosis in this record.
 
 ## Development workflow
 
@@ -69,6 +67,6 @@ confirmation and controller-test results are recorded separately above.
 
 ## Next
 
-Validate the implemented transcription path on CoreS3 when a device upload is
-authorized. No further feature is selected. Choose later outcomes from the
-[backlog](feature-backlog.md) and prepare their own approved plans.
+Detailed device regression scenarios are listed in the
+[transcription checklist](plan/tap-to-transcribe.md#t3-connect-tap-recording-to-transcript-results).
+Future feature choices are in the [backlog](feature-backlog.md).

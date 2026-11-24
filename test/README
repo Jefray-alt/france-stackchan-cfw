@@ -1,5 +1,5 @@
 
-Controller tests on the host
+Firmware tests on the host
 ============================
 
 Run from the repository root with PlatformIO Core and a host C++ compiler
@@ -14,23 +14,38 @@ dependency on the first run. No CoreS3 is needed and this command never uploads.
 The test_controller suite uses Unity. setUp() creates a fresh RobotStateMachine
 value for each test; timestamps are explicit uint32_t millisecond values and
 press inputs are individual events, not held-touch levels. No real sleeps or
-hardware mocks are used. The native build_src_filter compiles the production
-RobotStateMachine.cpp and TranscriptionProtocol.cpp; Arduino main,
-RobotController, RobotAudio, RobotTranscription, FaceRenderer, and M5Unified
-are excluded. The firmware builds the same helper and supplies millis() and
+hardware mocks are used by this suite. The native build_src_filter compiles
+production RobotStateMachine.cpp, TranscriptionProtocol.cpp and RobotAudio.cpp;
+Arduino main, RobotController, RobotTranscription, FaceRenderer and real
+M5Unified are excluded. Audio uses the native-only test/support driver/heap
+fixtures through an include path configured only in the native environment.
+The firmware builds the same helper and supplies millis() and
 M5.Touch.getDetail().wasPressed() at its hardware boundary.
 
-The 18 controller cases cover readiness rejection without capturing, ten
+The 19 controller cases cover readiness rejection without capturing, ten
 capture/submit/result cycles with once-only action signals, empty results,
 busy/held presses, and presses coincident with completion or late cleanup.
-They exercise capture's 4999/5000 ms and transcription's 29999/30000 ms
-boundaries, independent watchdog clocks, unsigned rollover, immediate admission
+They exercise capture's 10999/11000 ms and transcription's 29999/30000 ms
+boundaries, finalized capture precedence, once-only no-speech with no upload,
+independent watchdog clocks, unsigned rollover, immediate admission
 and worker failures, stale/late request IDs, and capture admission held until
 transport acknowledgment. Playback facts cannot enter a speaking phase.
 Idle-only sleep, repeated wake-to-idle, fresh-press recording, initialization,
 and completion/failure inactivity refresh are covered. Pure readiness, pending,
 ID and result facts carry no networking types across the native boundary.
 See docs/plan/tap-to-transcribe.md for the accepted interaction and device checks.
+
+The eight test_audio cases run production RobotAudio against the M5 two-slot
+queue/callback and PSRAM allocation fixtures. They cover queued 20 ms frames,
+speech beyond two seconds, 3-second initial silence and delayed onset, exact
+120 ms cumulative activity, 4.98/5.00-second hangover/reset, quiet/brief noise,
+exact 160,000-sample cap (including a quiet wait cut short by the cap),
+sample-count playback/borrowing, buffer reuse and busy borrows, failed allocation/start/refill, retry, delayed final callback, and a
+slow main update discarding captured tail only after driver join. The fixture
+models completed PCM and driver ownership; it does not prove actual I2S/DMA
+continuity or thread scheduling. Energy checks cover 99 PCM units below the
+100-unit mean absolute threshold and 100 units at the threshold. This threshold
+is an initial device-tuning value, not a validated speech detector.
 
 The test_transcription suite exercises the same bounded HTTP parser used by
 the worker, without a socket or RTOS mock. It covers numeric IPv4 base URLs,
@@ -39,16 +54,18 @@ HTTP rejection/redirects, incomplete bodies, malformed or ambiguous framing,
 media/encoding rejection, fixed header/line/body limits, canary-protected output,
 and invalid/overlong/surrogate/out-of-range UTF-8. It does not establish socket
 cleanup, task allocation, clip ownership under real concurrency, Wi-Fi memory
-use or device timing. Those remain CoreS3 checks in the tap-to-transcribe plan.
+use or device timing. See the tap-to-transcribe plan for the device checklist
+and docs/plan/speech-silence-stop.md#cores3-validation-follow-up for the
+user-reported result.
 
 Firmware compile check (also no upload):
 
     pio run -e m5stack-cores3
 
-Native tests establish decisions and once-per-update action signals only;
-actual capture/submission/Serial counts, length-based Serial output, concurrent
+Native tests establish sample/state decisions, modeled driver handoff and
+once-per-update action signals; actual capture/submission/Serial counts, length-based Serial output, concurrent
 clip release, microphone quality, physical touch, renderer notifications, blink
-recovery and networking require the transcription plan's CoreS3 checks. The
-backend suite checks its process/HTTP boundary separately; T1 also records a
+recovery and networking require the silence-stop and transcription plans'
+CoreS3 checks. The backend suite checks its process/HTTP boundary separately; T1 also records a
 real local-model clip smoke. Neither command above flashes a device; a build
 does not prove behavior.

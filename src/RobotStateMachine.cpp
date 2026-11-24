@@ -36,18 +36,24 @@ bool RobotStateMachine::update(bool wasPressed, uint32_t now, const Inputs& inpu
 
   if (state == RobotState::LISTENING)
   {
-    if (static_cast<uint32_t>(now - lastStateChange) >= 5000)
+    // A finalized clip on this update takes precedence over the wall clock.
+    if (inputs.audioStatus == RobotAudio::Status::RECORDED)
+    {
+      requestedActions.submitTranscription = true;
+      return setState(RobotState::THINKING, now);
+    }
+    if (inputs.audioStatus == RobotAudio::Status::NO_SPEECH)
+    {
+      requestedActions.completion = Completion::NO_SPEECH;
+      return setState(RobotState::IDLE, now);
+    }
+    if (static_cast<uint32_t>(now - lastStateChange) >= 11000)
     {
       return fail(Failure::CAPTURE_TIMED_OUT, now);
     }
     if (inputs.audioStatus == RobotAudio::Status::FAILED)
     {
       return fail(Failure::CAPTURE_FAILED, now);
-    }
-    if (inputs.audioStatus == RobotAudio::Status::RECORDED)
-    {
-      requestedActions.submitTranscription = true;
-      return setState(RobotState::THINKING, now);
     }
     return false;
   }

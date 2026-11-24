@@ -3,8 +3,8 @@
 **Status:** Original interactive-face milestone completed with user-reported
 CoreS3 validation on 2026-11-23. Local audio record/replay was user-validated on
 CoreS3 on 2026-11-24; detailed post-refactor regression observations remain
-unrecorded. Tap-to-transcribe through local Whisper is implemented with host
-checks and firmware builds; device transcription validation is pending.
+unrecorded. The user also confirmed tap-to-transcribe through local Whisper
+works on CoreS3 on 2026-11-24.
 Future product scope remains subject to the user's priorities.
 
 ## Purpose and audience
@@ -19,13 +19,13 @@ The repository contains Arduino firmware that draws a face, changes its visual
 state on touch, animates blinking, and implements inactivity-based sleep and
 wake logic. The user confirmed the original milestone on CoreS3; evidence and
 limitations are in the [validation record](plan/interactive-face-validation.md).
-The current idle tap records two seconds, waits in thinking, prints the local
-Whisper transcript once in Serial, and returns idle. Host state/protocol tests,
-backend tests and firmware builds pass; the
-[transcription plan](plan/tap-to-transcribe.md) records pending CoreS3 checks.
+The current idle tap records until a sustained pause or a ten-second cap,
+waits in thinking, prints the local Whisper transcript once in Serial, and
+returns idle. The [silence-stop plan](plan/speech-silence-stop.md#cores3-validation-follow-up)
+records the device confirmation and automated checks.
 Earlier automatic audio replay has user-confirmed validation on 2026-11-24;
 see the [historical audio record](plan/audio-record-replay.md#hardware-validation-follow-up).
-Current host coverage and pending device checks belong in the [roadmap](roadmap.md).
+See the [roadmap](roadmap.md) for current coverage and remaining verification detail.
 
 ## Completed first milestone
 

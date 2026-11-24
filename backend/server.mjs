@@ -5,7 +5,8 @@ import { isIP } from 'node:net';
 import { isAbsolute, resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
 
-const PCM_BYTES = 64000;
+const MIN_PCM_BYTES = 3840;
+const MAX_PCM_BYTES = 320000;
 const TRANSCRIPT_BYTES = 2048;
 const OUTPUT_BYTES = TRANSCRIPT_BYTES + 64;
 
@@ -158,10 +159,10 @@ export function transcribe(pcm, config, {
   });
 }
 
-function receiveBody(request, signal, timeoutMs)
+function receiveBody(request, signal, timeoutMs, expectedBytes)
 {
   return new Promise((resolveBody, rejectBody) => {
-    const body = Buffer.alloc(PCM_BYTES);
+    const body = Buffer.alloc(expectedBytes);
     let bytes = 0;
     const finish = (error) => {
       clearTimeout(timer);
@@ -173,17 +174,18 @@ function receiveBody(request, signal, timeoutMs)
       else resolveBody(body);
     };
     const onData = (chunk) => {
-      if (bytes + chunk.length > PCM_BYTES)
+      if (bytes + chunk.length > expectedBytes)
       {
-        finish(new RequestError(413, 'Recording too large'));
+        finish(new RequestError(400, 'Invalid recording length'));
         return;
       }
       chunk.copy(body, bytes);
       bytes += chunk.length;
     };
-    const onEnd = () => finish(bytes === PCM_BYTES ? null : new RequestError(400, 'Invalid recording length'));
+    const onEnd = () => finish(bytes === expectedBytes ? null : new RequestError(400, 'Invalid recording length'));
     const onError = () => finish(new RequestError(400, 'Invalid recording body'));
-    const onAbort = () => finish(new RequestError(503, 'Request cancelled'));
+    const onAbort = () => finish(new RequestError(request.aborted ? 400 : 503,
+      request.aborted ? 'Invalid recording body' : 'Request cancelled'));
     const timer = setTimeout(() => finish(new RequestError(400, 'Recording body timed out')), timeoutMs);
     request.on('data', onData);
     request.once('end', onEnd);
@@ -223,12 +225,18 @@ export function createTranscriptionServer(config, {
       return reject(415, 'Expected application/octet-stream');
     }
     const length = request.headers['content-length'];
-    if (request.headers['transfer-encoding'] || !length || !/^[0-9]+$/.test(length))
+    if (request.headers['transfer-encoding'] !== undefined
+        || request.headers['content-encoding'] !== undefined
+        || !length || !/^[0-9]+$/.test(length))
     {
-      return reject(400, 'Expected Content-Length: 64000');
+      return reject(400, 'Expected even PCM Content-Length from 3840 to 320000');
     }
-    if (Number(length) > PCM_BYTES) return reject(413, 'Recording too large');
-    if (Number(length) !== PCM_BYTES) return reject(400, 'Expected Content-Length: 64000');
+    if (Number(length) > MAX_PCM_BYTES) return reject(413, 'Recording too large');
+    const pcmBytes = Number(length);
+    if (pcmBytes < MIN_PCM_BYTES || pcmBytes % 2 !== 0)
+    {
+      return reject(400, 'Expected even PCM Content-Length from 3840 to 320000');
+    }
 
     const controller = new AbortController();
     const cancel = () => controller.abort();
@@ -242,7 +250,7 @@ export function createTranscriptionServer(config, {
     void (async () => {
       try
       {
-        const pcm = await receiveBody(request, controller.signal, bodyTimeoutMs);
+        const pcm = await receiveBody(request, controller.signal, bodyTimeoutMs, pcmBytes);
         const text = await transcribe(pcm, config, {
           signal: controller.signal, spawnProcess, inferenceTimeoutMs, killGraceMs
         });

@@ -77,6 +77,30 @@ test('valid PCM becomes an exact WAV and transcript-only UTF-8 response', async 
   assert.equal(calls, 1);
 });
 
+test('minimum, intermediate and maximum clips preserve exact WAV sizes and PCM', async (t) => {
+  for (const length of [3840, 64002, 320000])
+  {
+    await t.test(String(length), async (t) => {
+      const body = Buffer.alloc(length);
+      for (let i = 0; i < length; i++) body[i] = i % 251;
+      const app = await start(t, { spawnProcess: fixture(`
+        import assert from 'node:assert/strict';
+        const chunks = [];
+        for await (const chunk of process.stdin) chunks.push(chunk);
+        const wav = Buffer.concat(chunks);
+        assert.equal(wav.length, ${length} + 44);
+        assert.equal(wav.readUInt32LE(4), ${length} + 36);
+        assert.equal(wav.readUInt32LE(40), ${length});
+        for (let i = 0; i < ${length}; i++) assert.equal(wav[i + 44], i % 251);
+        process.stdout.write('variable clip');
+      `) });
+      const result = await post(app, body);
+      assert.equal(result.status, 200);
+      assert.equal(result.body, 'variable clip');
+    });
+  }
+});
+
 function fixture(source, onChild = () => {})
 {
   return (_file, _args, options) => {
@@ -142,7 +166,11 @@ test('invalid media, length, framing, paths and methods never launch a process',
     [pcm, { 'Content-Type': 'audio/wav' }, 'POST', '/v1/transcriptions', 415],
     [pcm, { 'Content-Type': 'application/octet-stream; rate=16000' }, 'POST', '/v1/transcriptions', 415],
     [Buffer.alloc(1), {}, 'POST', '/v1/transcriptions', 400],
-    [Buffer.alloc(64001), {}, 'POST', '/v1/transcriptions', 413],
+    [Buffer.alloc(3838), {}, 'POST', '/v1/transcriptions', 400],
+    [Buffer.alloc(3839), {}, 'POST', '/v1/transcriptions', 400],
+    [Buffer.alloc(64001), {}, 'POST', '/v1/transcriptions', 400],
+    [Buffer.alloc(320001), {}, 'POST', '/v1/transcriptions', 413],
+    [pcm, { 'Content-Encoding': 'gzip' }, 'POST', '/v1/transcriptions', 400],
     [Buffer.alloc(0), { 'Content-Length': undefined }, 'POST', '/v1/transcriptions', 400],
     [pcm, { 'Content-Length': undefined, 'Transfer-Encoding': 'chunked' }, 'POST', '/v1/transcriptions', 400],
     [Buffer.alloc(0), {}, 'GET', '/v1/transcriptions', 405],
@@ -154,17 +182,41 @@ test('invalid media, length, framing, paths and methods never launch a process',
   assert.equal(calls, 0);
 });
 
-test('short transport body is rejected before inference', async (t) => {
+test('short transport bodies at minimum, legacy and maximum lengths never infer', async (t) => {
   let calls = 0;
   const app = await start(t, { spawnProcess: () => { calls++; throw new Error('must not spawn'); } });
-  const socket = connect({ host: '127.0.0.1', port: app.port, allowHalfOpen: true });
-  t.after(() => socket.destroy());
-  let response = '';
-  socket.on('data', (chunk) => { response += chunk.toString(); });
-  await once(socket, 'connect');
-  socket.end('POST /v1/transcriptions HTTP/1.1\r\nHost: localhost\r\nContent-Type: application/octet-stream\r\nContent-Length: 64000\r\n\r\nshort');
-  await once(socket, 'end');
-  assert.match(response, /^HTTP\/1\.1 400 /);
+  for (const length of [3840, 64000, 320000])
+  {
+    const socket = connect({ host: '127.0.0.1', port: app.port, allowHalfOpen: true });
+    t.after(() => socket.destroy());
+    let response = '';
+    socket.on('data', (chunk) => { response += chunk.toString(); });
+    await once(socket, 'connect');
+    socket.end(`POST /v1/transcriptions HTTP/1.1\r\nHost: localhost\r\nContent-Type: application/octet-stream\r\nContent-Length: ${length}\r\n\r\nshort`);
+    await once(socket, 'end');
+    assert.match(response, /^HTTP\/1\.1 400 /);
+  }
+  assert.equal(calls, 0);
+});
+
+test('ambiguous or malformed raw framing never launches inference', async (t) => {
+  let calls = 0;
+  const app = await start(t, { spawnProcess: () => { calls++; throw new Error('must not spawn'); } });
+  for (const framing of [
+    'Content-Length: 3840\r\nContent-Length: 3840',
+    'Content-Length: 3840\r\nTransfer-Encoding: chunked',
+    'Content-Length: -2', 'Content-Length: 3.5', 'Content-Length: invalid'
+  ])
+  {
+    const socket = connect({ host: '127.0.0.1', port: app.port });
+    t.after(() => socket.destroy());
+    let response = '';
+    socket.on('data', (chunk) => { response += chunk.toString(); });
+    await once(socket, 'connect');
+    socket.end(`POST /v1/transcriptions HTTP/1.1\r\nHost: localhost\r\nContent-Type: application/octet-stream\r\n${framing}\r\n\r\n`);
+    await once(socket, 'end');
+    assert.match(response, /^HTTP\/1\.1 400 /);
+  }
   assert.equal(calls, 0);
 });
 

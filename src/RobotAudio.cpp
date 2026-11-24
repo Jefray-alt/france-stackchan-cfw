@@ -1,17 +1,18 @@
 #include "RobotAudio.h"
 
 #include <M5Unified.h>
+#include <esp_heap_caps.h>
 
 namespace
 {
   constexpr uint8_t kSpeakerVolume = 255;
-  constexpr uint8_t kSpeakermMagnification = 32;
   constexpr uint8_t kPlaybackChannel = 0;
 }
 
 RobotAudio::~RobotAudio()
 {
   releaseHardware();
+  heap_caps_free(samples);
 }
 
 bool RobotAudio::startRecording()
@@ -23,21 +24,132 @@ bool RobotAudio::startRecording()
 
   stop();
 
-  auto config = M5.Mic.config();
-  M5.Mic.config(config);
+  if (!samples)
+  {
+    samples = static_cast<int16_t*>(heap_caps_malloc(
+        kMaxSampleCount * sizeof(int16_t), MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT));
+    if (!samples)
+    {
+      return fail(Error::BUFFER_ALLOCATION);
+    }
+  }
 
   if (!M5.Mic.begin())
   {
     return fail(Error::MICROPHONE_START);
   }
 
-  if (!M5.Mic.record(samples, kSampleCount, kSampleRate, false))
+  completedSamples.store(0, std::memory_order_relaxed);
+  processedSamples = activitySamples = silentSamples = 0;
+  refillFailed.store(false, std::memory_order_relaxed);
+  nextQueuedSample = 2 * kFrameSamples;
+  captureStarting.store(true, std::memory_order_release);
+  captureStopping.store(false, std::memory_order_release);
+  M5.Mic.setBufferReleaseCallback(this, bufferReleased);
+  // Maintain two requests: the next one is already queued when a frame ends.
+  // If startup is preempted for a whole frame, fail rather than accept a gap.
+  const bool admitted = M5.Mic.record(samples, kFrameSamples, kSampleRate, false)
+      && M5.Mic.record(samples + kFrameSamples, kFrameSamples, kSampleRate, false);
+  captureStarting.store(false, std::memory_order_release);
+  if (!admitted || refillFailed.load(std::memory_order_acquire))
   {
     return fail(Error::RECORD_REQUEST);
   }
 
   currentStatus = Status::RECORDING;
   return true;
+}
+
+void RobotAudio::bufferReleased(void* context, void* data, size_t count)
+{
+  auto& audio = *static_cast<RobotAudio*>(context);
+  if (audio.captureStopping.load(std::memory_order_acquire))
+  {
+    return;
+  }
+
+  const size_t completed = audio.completedSamples.load(std::memory_order_relaxed);
+  if (data != audio.samples + completed || count != kFrameSamples
+      || completed + count > kMaxSampleCount
+      || audio.captureStarting.load(std::memory_order_acquire))
+  {
+    audio.refillFailed.store(true, std::memory_order_release);
+    return;
+  }
+  audio.completedSamples.store(completed + count, std::memory_order_release);
+
+  // No energy calculation, allocation, end(), or controller work here.
+  if (audio.nextQueuedSample < kMaxSampleCount)
+  {
+    if (!M5.Mic.record(audio.samples + audio.nextQueuedSample,
+            kFrameSamples, kSampleRate, false))
+    {
+      if (!audio.captureStopping.load(std::memory_order_acquire))
+      {
+        audio.refillFailed.store(true, std::memory_order_release);
+      }
+      return;
+    }
+    audio.nextQueuedSample += kFrameSamples;
+  }
+}
+
+void RobotAudio::processRecording()
+{
+  if (!M5.Mic.isRunning())
+  {
+    fail(Error::MICROPHONE_STOPPED);
+    return;
+  }
+  if (refillFailed.load(std::memory_order_acquire))
+  {
+    fail(Error::RECORD_REQUEST);
+    return;
+  }
+
+  // isRecording() can drop before the buffer-release callback. Only consume
+  // its published watermark; never infer completion from queue emptiness.
+  const size_t available = completedSamples.load(std::memory_order_acquire);
+  while (processedSamples < available)
+  {
+    uint32_t energy = 0;
+    for (size_t i = processedSamples; i < processedSamples + kFrameSamples; ++i)
+    {
+      const int32_t value = samples[i];
+      energy += value < 0 ? -value : value;
+    }
+    processedSamples += kFrameSamples;
+    if (energy >= kActivityThreshold * kFrameSamples)
+    {
+      activitySamples += kFrameSamples;
+      silentSamples = 0;
+    }
+    else
+    {
+      silentSamples += kFrameSamples;
+    }
+
+    const bool initialSilence = activitySamples == 0
+        && processedSamples >= kInitialSilenceSamples;
+    const bool hangover = activitySamples != 0 && silentSamples >= kHangoverSamples;
+    if (initialSilence || hangover || processedSamples == kMaxSampleCount)
+    {
+      // Drop any queued/finished tail after this frame. end() joins the task
+      // before either the transport or speaker may borrow the retained range.
+      captureStopping.store(true, std::memory_order_release);
+      M5.Mic.end();
+      M5.Mic.setBufferReleaseCallback(nullptr, nullptr);
+      if (refillFailed.load(std::memory_order_acquire))
+      {
+        fail(Error::RECORD_REQUEST);
+        return;
+      }
+      sampleCount = processedSamples;
+      currentStatus = activitySamples >= kMinimumActivitySamples
+          ? Status::RECORDED : Status::NO_SPEECH;
+      return;
+    }
+  }
 }
 
 bool RobotAudio::startPlayback()
@@ -72,7 +184,7 @@ bool RobotAudio::startPlayback()
   }
 
   if (!M5.Speaker.playRaw(
-          samples, kSampleCount, kSampleRate, false, 1, kPlaybackChannel, false))
+          samples, sampleCount, kSampleRate, false, 1, kPlaybackChannel, false))
   {
     return fail(Error::PLAY_REQUEST);
   }
@@ -86,15 +198,7 @@ void RobotAudio::update(uint32_t now)
 {
   if (currentStatus == Status::RECORDING)
   {
-    if (!M5.Mic.isRunning())
-    {
-      fail(Error::MICROPHONE_STOPPED);
-    }
-    else if (M5.Mic.isRecording() == 0)
-    {
-      M5.Mic.end();
-      currentStatus = Status::RECORDED;
-    }
+    processRecording();
   }
   else if (currentStatus == Status::PLAYING)
   {
@@ -130,19 +234,23 @@ void RobotAudio::stop()
   currentStatus = Status::IDLE;
   currentError = Error::NONE;
   drainingPlayback = false;
+  sampleCount = 0;
 }
 
 void RobotAudio::releaseHardware()
 {
   // Do not use Speaker.stop(): it only queues a marker and does not join.
   // Keep samples alive and unchanged until both end() calls return.
+  captureStopping.store(true, std::memory_order_release);
   M5.Mic.end();
+  M5.Mic.setBufferReleaseCallback(nullptr, nullptr);
   M5.Speaker.end();
 }
 
 bool RobotAudio::fail(Error error)
 {
   releaseHardware();
+  sampleCount = 0;
   currentError = error;
   currentStatus = Status::FAILED;
   drainingPlayback = false;
@@ -158,7 +266,7 @@ bool RobotAudio::borrowCompletedClip(Clip& clip)
 
   clipBorrowed = true;
   clip.samples = samples;
-  clip.sampleCount = kSampleCount;
+  clip.sampleCount = sampleCount;
   return true;
 }
 
