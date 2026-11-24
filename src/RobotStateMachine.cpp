@@ -4,12 +4,9 @@ void RobotStateMachine::begin(uint32_t now)
 {
   state = RobotState::IDLE;
   lastStateChange = now;
-  operationFailed = false;
-}
-
-RobotState RobotStateMachine::getState() const
-{
-  return state;
+  activeRequestId = 0;
+  requestedActions = Actions{};
+  currentFailure = Failure::NONE;
 }
 
 bool RobotStateMachine::setState(RobotState newState, uint32_t now)
@@ -19,58 +16,87 @@ bool RobotStateMachine::setState(RobotState newState, uint32_t now)
     return false;
   }
 
-  // THINKING queues playback; entering SPEAKING must not extend its watchdog.
-  if (newState != RobotState::SPEAKING)
-  {
-    lastStateChange = now;
-  }
-
+  lastStateChange = now;
   state = newState;
   return true;
 }
 
-bool RobotStateMachine::update(
-    bool wasPressed, uint32_t now, RobotAudio::Status audioStatus)
+bool RobotStateMachine::fail(Failure failure, uint32_t now)
 {
-  operationFailed = false;
-  if (state == RobotState::LISTENING || state == RobotState::THINKING ||
-      state == RobotState::SPEAKING)
-  {
-    operationFailed = audioStatus == RobotAudio::Status::FAILED ||
-        static_cast<uint32_t>(now - lastStateChange) >= 5000;
-    if (operationFailed)
-    {
-      return setState(RobotState::IDLE, now);
-    }
+  currentFailure = failure;
+  // Failed idle admission also refreshes inactivity without a face transition.
+  lastStateChange = now;
+  return setState(RobotState::IDLE, now);
+}
 
-    if (state == RobotState::LISTENING && audioStatus == RobotAudio::Status::RECORDED)
+bool RobotStateMachine::update(bool wasPressed, uint32_t now, const Inputs& inputs)
+{
+  requestedActions = Actions{};
+  currentFailure = Failure::NONE;
+
+  if (state == RobotState::LISTENING)
+  {
+    if (static_cast<uint32_t>(now - lastStateChange) >= 5000)
     {
+      return fail(Failure::CAPTURE_TIMED_OUT, now);
+    }
+    if (inputs.audioStatus == RobotAudio::Status::FAILED)
+    {
+      return fail(Failure::CAPTURE_FAILED, now);
+    }
+    if (inputs.audioStatus == RobotAudio::Status::RECORDED)
+    {
+      requestedActions.submitTranscription = true;
       return setState(RobotState::THINKING, now);
     }
-    if (state == RobotState::THINKING && audioStatus == RobotAudio::Status::PLAYING)
-    {
-      return setState(RobotState::SPEAKING, now);
-    }
-    if (state == RobotState::SPEAKING && audioStatus == RobotAudio::Status::COMPLETE)
-    {
-      return setState(RobotState::IDLE, now);
-    }
-
-    // Ignore busy presses, including a press coincident with completion.
     return false;
   }
 
-  if (wasPressed)
+  if (state == RobotState::THINKING)
   {
-    return setState(state == RobotState::SLEEPING
-        ? RobotState::IDLE : RobotState::LISTENING, now);
+    if (static_cast<uint32_t>(now - lastStateChange) >= 30000)
+    {
+      return fail(Failure::TRANSCRIPTION_TIMED_OUT, now);
+    }
+    if (inputs.resultStatus != ResultStatus::NONE &&
+        inputs.resultRequestId == activeRequestId)
+    {
+      if (inputs.resultStatus == ResultStatus::FAILED)
+      {
+        return fail(Failure::TRANSCRIPTION_FAILED, now);
+      }
+      requestedActions.completion = inputs.resultStatus == ResultStatus::EMPTY
+          ? Completion::NO_SPEECH : Completion::TRANSCRIPT;
+      return setState(RobotState::IDLE, now);
+    }
+    // Ignore busy touches, stale IDs and playback facts. Never queue a press.
+    return false;
   }
 
-  if (state == RobotState::IDLE &&
-      static_cast<uint32_t>(now - lastStateChange) >= 30000)
+  if (state == RobotState::SLEEPING)
+  {
+    return wasPressed ? setState(RobotState::IDLE, now) : false;
+  }
+
+  // A late acknowledgment can release the old clip, but its coincident press
+  // is still a busy press. A new distinct press is required after cleanup.
+  if (wasPressed && !inputs.requestPending && inputs.resultStatus == ResultStatus::NONE)
+  {
+    if (!inputs.transcriptionReady)
+    {
+      return fail(Failure::TRANSCRIPTION_UNAVAILABLE, now);
+    }
+    if (++activeRequestId == 0)
+    {
+      ++activeRequestId;
+    }
+    requestedActions.startRecording = true;
+    return setState(RobotState::LISTENING, now);
+  }
+
+  if (static_cast<uint32_t>(now - lastStateChange) >= 30000)
   {
     return setState(RobotState::SLEEPING, now);
   }
-
   return false;
 }

@@ -20,16 +20,17 @@ RobotController, RobotAudio, RobotTranscription, FaceRenderer, and M5Unified
 are excluded. The firmware builds the same helper and supplies millis() and
 M5.Touch.getDetail().wasPressed() at its hardware boundary.
 
-The 12 tests cover ten automatic capture/replay cycles, repeated busy presses,
-held-event absence, completion races, stale completion facts, failures at each
-active phase, and retries. Parameterized cases check 4999/5000 ms watchdog
-boundaries (including simultaneous completion), playback handoff without a timer
-extension, and completion/failure/timeout inactivity refresh across uint32_t wrap.
-Idle boundaries, press precedence, three sleep/wake cycles, and initialization
-at current uptime are covered. begin(now) now resets to idle and starts its clock
-at now; public state setters were removed to keep audio and face state aligned.
-Simulated FAILED inputs represent initialization, request, or stopped-driver
-failures. They do not test M5Unified calls. See docs/plan/audio-record-replay.md.
+The 18 controller cases cover readiness rejection without capturing, ten
+capture/submit/result cycles with once-only action signals, empty results,
+busy/held presses, and presses coincident with completion or late cleanup.
+They exercise capture's 4999/5000 ms and transcription's 29999/30000 ms
+boundaries, independent watchdog clocks, unsigned rollover, immediate admission
+and worker failures, stale/late request IDs, and capture admission held until
+transport acknowledgment. Playback facts cannot enter a speaking phase.
+Idle-only sleep, repeated wake-to-idle, fresh-press recording, initialization,
+and completion/failure inactivity refresh are covered. Pure readiness, pending,
+ID and result facts carry no networking types across the native boundary.
+See docs/plan/tap-to-transcribe.md for the accepted interaction and device checks.
 
 The test_transcription suite exercises the same bounded HTTP parser used by
 the worker, without a socket or RTOS mock. It covers numeric IPv4 base URLs,
@@ -44,7 +45,10 @@ Firmware compile check (also no upload):
 
     pio run -e m5stack-cores3
 
-Native tests establish decisions and once-per-transition signals only; actual
-driver request counts, microphone/speaker routing, audio quality, physical touch,
-renderer/Serial notifications, and blink recovery require the audio plan's CoreS3
-checks. Neither command above flashes a device; a build does not prove behavior.
+Native tests establish decisions and once-per-update action signals only;
+actual capture/submission/Serial counts, length-based Serial output, concurrent
+clip release, microphone quality, physical touch, renderer notifications, blink
+recovery and networking require the transcription plan's CoreS3 checks. The
+backend suite checks its process/HTTP boundary separately; T1 also records a
+real local-model clip smoke. Neither command above flashes a device; a build
+does not prove behavior.

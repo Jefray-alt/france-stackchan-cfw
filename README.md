@@ -2,10 +2,11 @@
 
 Custom firmware for an M5Stack CoreS3, built with PlatformIO, the Arduino
 framework, and M5Unified. The current source implements a touch-driven face
-with idle, listening, thinking, speaking, and sleeping states. A tap records a
-two-second microphone clip and automatically replays it through the speaker.
-Audio record/replay was user-validated on CoreS3 on 2026-11-24;
-AI remains a future candidate.
+with idle, listening, thinking, and sleeping interaction states. An idle tap
+records two seconds and sends the clip to a disposable local Whisper backend;
+the returned transcript appears once in Serial. This path is implemented with
+host tests and firmware builds; CoreS3 transcription validation is pending.
+Earlier local audio record/replay was user-validated on 2026-11-24.
 
 ## Repository
 
@@ -14,7 +15,7 @@ AI remains a future candidate.
 - `src/RobotController.cpp`: touch input, rendering, and state-change logging.
 - `src/RobotStateMachine.cpp`: hardware-independent state and inactivity decisions.
 - `src/RobotAudio.cpp`: fixed PCM buffer and exclusive microphone/speaker lifecycle.
-- `src/RobotTranscription.cpp`: bounded Wi-Fi/socket worker, not yet wired to taps.
+- `src/RobotTranscription.cpp`: bounded Wi-Fi/socket worker and clip/result handoff.
 - `src/TranscriptionProtocol.cpp`: fixed-size HTTP framing and UTF-8 validation.
 - `src/FaceRenderer.cpp`: face drawing and blink timing.
 - `include/`: project headers and the shared `RobotState` enum.
@@ -73,29 +74,35 @@ Startup prints `Robot initialized`; state transitions print
 `Robot state changed: <number>`. State numbers follow the declaration order
 in `include/RobotState.h`.
 
-### Record and replay
+### Tap to transcribe
 
-Tap while idle to record two seconds, then hear the clip automatically.
-The face shows listening during capture, thinking during handoff, and speaking
-during playback before returning to idle. Busy presses and held touches do not
-queue another clip. After 30 seconds idle the face sleeps; the first sleeping
-press wakes to idle, and the next distinct press records.
+Start the local backend and configure Wi-Fi as below. Tap while idle, then speak
+a short phrase during the two-second, 16 kHz mono capture. The listening face
+changes to thinking while one request is processed. Success prints
+`Transcript: <text>` once, preserving UTF-8 bytes, then returns idle. An empty
+successful result prints `No speech transcribed`. There is no speaking phase or
+automatic replay in this interaction; the existing playback transport remains
+available in the source. No VAD, longer capture, AI response or generated audio
+is included. Whisper can produce text from silence/noise, so an empty-result
+message does not establish reliable speech detection.
 
-Audio failures and five-second operation timeouts print one diagnostic, discard
-the clip, and return to idle for retry. M5Unified driver cleanup may wait inside
-library calls; the watchdog cannot preempt those waits. Volume starts at 128/255.
-The [audio validation record](docs/plan/audio-record-replay.md#hardware-validation-follow-up)
-records the user's confirmation that audio is working on CoreS3. Individual
-checklist observations, including cycle counts and failure recovery, were not
-supplied; the plan retains the scenarios for future regression checks.
+Busy presses and held touches do not queue recordings. After 30 seconds idle,
+the face sleeps; a sleeping press wakes to idle, and the next distinct press
+records. Completion and failure refresh inactivity. A disconnected or
+unconfigured idle press prints a diagnostic without capturing audio for later.
+Capture has a five-second watchdog and transcription has a separate 30-second
+watchdog. Failures print one diagnostic and return idle. After a request timeout,
+new recordings remain blocked until the worker acknowledges socket cleanup;
+late transcripts are discarded. Retry with a fresh press after cleanup and
+connectivity recovery. M5Unified driver cleanup and SDK socket close may wait
+inside library calls; a logical watchdog does not preempt those calls.
 
-### Local transcription transport setup
+### Local transcription setup
 
-The local transcription transport is available for integration, but taps still
-record and replay. Constructing it starts no Wi-Fi; the controller does not yet
-call its explicit `begin()` or submit clips. The disposable
-[backend setup](backend/README.md) describes installing local Whisper, choosing
-a model and starting the Node service. Inference needs no internet after setup.
+The disposable [backend setup](backend/README.md) describes installing local
+Whisper, choosing a model and starting the Node service. Inference needs no
+internet after setup. With configuration, the controller starts the persistent
+network worker at boot without waiting for Wi-Fi association.
 
 Copy the firmware example and edit only the ignored local copy:
 
@@ -111,17 +118,17 @@ redirects are unsupported. Bind the backend to the computer's LAN address or
 `0.0.0.0` as described in its README. `localhost` on CoreS3 refers to CoreS3,
 not the computer. This plain HTTP path is for a trusted LAN. Never commit
 `include/LocalConfig.h` or real Wi-Fi credentials; only the placeholder example
-is tracked. Missing configuration still compiles and the transport reports
-unconfigured when initialized; the existing face/audio interaction is usable.
+is tracked. Missing configuration still compiles; an idle transcription press
+reports it as unconfigured, and face/sleep/wake remain usable.
 
-After integration, one persistent worker schedules Wi-Fi attempts every ten
-seconds without waiting for association in the main loop. A disconnected
-submission fails immediately. There is one request and one result slot; the
-worker borrows the existing 64,000-byte PCM buffer instead of copying it. The
-main task must keep polling results even after an interaction times out: only
-an acknowledgment after socket close releases the clip for a new recording.
-The response includes an ID and explicit UTF-8 byte length so stale results can
-be discarded and embedded NUL does not silently shorten Serial output.
+One persistent worker schedules Wi-Fi attempts every ten seconds without
+waiting for association in the main loop. A disconnected submission fails
+immediately. There is one request and one result slot; the worker borrows the
+existing 64,000-byte PCM buffer instead of copying it. The
+main task keeps polling results even after an interaction times out: only an
+acknowledgment after socket close releases the clip for a new recording.
+Request IDs reject stale results, and explicit UTF-8 byte lengths preserve
+embedded NUL in Serial output.
 
 The direct nonblocking socket has a one-second connection limit, a five-second
 upload/response-progress idle limit, a 25-second first-response wait for local
@@ -140,8 +147,12 @@ worker has released the clip.
 
 A successful build checks compilation and linking. Touch, display, sleep,
 wake, and blink behavior also need verification on the physical CoreS3.
-Use the [current audio checklist](docs/plan/audio-record-replay.md) and
-record what actually ran in the task plan when required, or in the handoff or PR.
+Use the [transcription checklist](docs/plan/tap-to-transcribe.md#t3-connect-tap-recording-to-transcript-results)
+for ten real phrases, microphone quality, failure/cleanup/retry, repeated
+sleep/wake and blinking, Wi-Fi heap/stack/task headroom, and LAN operation with
+external internet disconnected. These checks remain pending; the earlier
+[audio validation](docs/plan/audio-record-replay.md#hardware-validation-follow-up)
+is historical evidence for record/replay, not this transcription path.
 
 Run deterministic controller tests on the host (requires a C++ compiler):
 

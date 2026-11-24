@@ -1,6 +1,7 @@
 # Tap to transcribe with a disposable local backend
 
-**Status:** Approved; implementation progressing in the dedicated worktree.
+**Status:** Implementation complete; all three tasks independently reviewed and
+committed. CoreS3 transcription validation remains pending.
 
 **Outcome:** Tap the CoreS3, speak a short phrase during its two-second capture,
 and read the returned transcript in Serial while the face remains responsive.
@@ -563,7 +564,84 @@ If unavailable, record these as pending rather than marking full validation.
 
 **Proposed commit if authorized:** `feat(robot): transcribe tapped recordings through local backend`
 
-**Status and evidence:** Pending; no interaction changes or tests run.
+**Status and evidence:** Complete; independent review PASS in round 1 of 3.
+Committed with the proposed T3 subject after the checks and review below.
+Device transcription validation remains pending. The developer did not stage,
+commit, push or upload.
+
+- T3 baseline: `feat/tap-to-transcribe` at
+  `8e117289c5d26c1b6680987d0c0e4f37e61c8a5d` in the approved dedicated worktree.
+  Startup branch/revision/status checks exited 0. Only unrelated untracked
+  `.DS_Store` was present; it remains preserved outside the candidate.
+  T1/T2 were already independently reviewed and committed. Developer runtime:
+  `gpt-6.1-sol` / `xhigh`, selected for integration timing, exactly-once actions,
+  stale IDs and borrow/release safety; no nested delegation.
+- The controller now initializes transport without waiting for association,
+  rejects unavailable idle taps before capture, submits once after recording,
+  and polls on every update, including after logical timeout. State inputs are
+  pure readiness/pending/result-ID facts. Once-only completion actions select
+  exact-length `Serial.write` for transcripts (including UTF-8/NUL) or one
+  `No speech transcribed` message. The controller owns error diagnostics;
+  late results cannot print or start a coincident recording. New capture stays
+  blocked until the worker acknowledgment releases the clip. Separate capture
+  and request watchdogs are five and 30 seconds. No T2 interface/production,
+  main, renderer, audio gain/speaker, platform or dependency changes were needed.
+- Meaningful RED before production edits:
+  `/Users/france/.platformio/penv/bin/pio test -e native` exited 1. The original
+  12 controller and seven protocol cases passed; two added assertions failed:
+  thinking incorrectly ended after the old five-second audio watchdog, and
+  `PLAYING` incorrectly entered speaking. The runner also reported SIGINT
+  after those failures. The RED log and reproducible test-only patch are in
+  `/Users/france/.cache/stackchan-t3-evidence/`.
+- GREEN: the same native command exited 0, 25/25 cases (18 controller and seven
+  protocol), final duration 1.613 seconds. Tests count one capture/submit/
+  transcript-or-no-speech action per cycle over ten cycles, busy/held touches,
+  immediate and worker failure, readiness rejection, stale/late IDs,
+  acknowledgment-gated retry, independent deadline boundaries, repeated
+  sleep/wake, inactivity refresh and unsigned rollover. No driver/RTOS/Serial
+  mocks were added; actual hardware call/print counts remain a device check.
+- Final `/Users/france/.platformio/penv/bin/pio run -e m5stack-cores3` passed
+  without local configuration (exit 0, 22.95 seconds): RAM 98,692/327,680
+  (30.1%), flash 606,903/6,553,600 (9.3%). The same command with a temporary exact
+  `LocalConfig.example.h` copy passed (exit 0, 24.43 seconds): RAM 118,620
+  (36.2%), flash 1,097,675 (16.7%). The configured image retains integrated
+  networking; neither figure measures runtime task/Wi-Fi heap use. The exact
+  procedure is `python3 /Users/france/.cache/stackchan-t3-evidence/run-final-checks.py`;
+  it asserts the local config is absent, copies the placeholder, and removes
+  it in `finally`. No real credentials or upload were used.
+- `/Users/france/.nvm/versions/node/v24.22.3/bin/node --test backend/server.test.mjs`
+  passed, exit 0, 28/28, 1,212.645 ms. No backend changes or repeated model
+  installation/smoke were needed; T1's real local-model evidence and accuracy
+  limit remain above. `pio pkg list -e m5stack-cores3` passed, exit 0: unchanged
+  espressif32 8.0.0, Arduino 3.3.12/package 4.30312.261116, M5Unified/M5GFX 0.3.0.
+  Dependencies remain unpinned. Final builds emitted the existing M5GFX unused
+  variable warnings, with no new project warning or compile error.
+- Documentation/configuration uses inspection rather than an invented failing
+  test: `python3 /Users/france/.cache/stackchan-t3-evidence/docs-config-check.py`
+  and `git diff --check` passed, exit 0. The script checks all 11 owned files,
+  relative links/anchors, fences/whitespace, exact integration call sites,
+  ignored example/local configuration behavior, no leftover local config or
+  backend environment/artifacts, preserved `.DS_Store`, and unchanged T2/main/
+  renderer/audio/platform files. Complete candidate diff, file hashes, exact
+  command/exit records and logs live outside the disposable worktree in the
+  same cache directory. No task-owned server, smoke or inference child remains.
+- Hardware is unavailable and no upload was authorized. Ten real phrases,
+  intelligible microphone input, actual Serial byte/print counts, face/blink/
+  busy-touch/sleep-wake behavior, concurrent ownership/cleanup, Wi-Fi loss and
+  recovery, allocation failures, heap/worker-stack/task stability and LAN use
+  with external internet disconnected remain pending. Builds and pure state/
+  protocol/backend tests do not establish those observations. README and
+  product status documents identify implementation separately from validation.
+
+- Independent review: `code_reviewer`, `gpt-6.1-sol` / `xhigh`, selected for
+  integrated timing, stale results and clip ownership. Round 1 of 3 returned
+  PASS with no actionable findings after inspecting all 11 frozen files and
+  transport/audio boundaries. Independent checks passed: 25/25 native cases
+  (1.927 seconds), 28/28 backend tests (1,175.600 ms), missing-config build
+  (RAM 98,692; flash 606,903), example-config build (RAM 118,620; flash
+  1,097,675), all frozen hashes, 33 documentation links/anchors, configuration
+  and whitespace. No source edits, upload or push occurred during review.
+- T3 commit subject: `feat(robot): transcribe tapped recordings through local backend`.
 
 ## Review and validation
 
@@ -605,8 +683,15 @@ If unavailable, record these as pending rather than marking full validation.
 ## Handoff
 
 - Plan prepared, revised for local Whisper, and approved on 2026-11-24.
-- T1 (`771f260`) and T2 are complete with separate task commits and independent
-  PASS verdicts. T3 remains pending; include its evidence with its task commit.
+- T1 (`771f260`), T2 (`8e11728`) and T3 are complete with separate task commits
+  and independent PASS verdicts, each in review round 1 of 3. T3 uses the
+  commit subject recorded above. Device transcription validation remains
+  pending as recorded above. No upload or push was performed.
+- Runtime/model setup and task evidence live outside the disposable worktree
+  under `/Users/france/.cache/stackchan-whisper-t1/`,
+  `/Users/france/.cache/stackchan-t2-evidence/` and
+  `/Users/france/.cache/stackchan-t3-evidence/`. No local configuration, backend
+  environment file or task-owned process must be preserved from the worktree.
 - Implement in the dedicated worktree, then remove it after clean committed
   completion and return the original checkout to the feature branch.
 - Retain the original audio validation record as historical evidence. Use this
