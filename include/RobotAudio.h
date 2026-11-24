@@ -35,25 +35,25 @@ public:
 
   static constexpr uint32_t kSampleRate = 16000;
   static constexpr size_t kMaxSampleCount = 160000;
-  static constexpr size_t kFrameSamples = 320; // 20 ms at 16 kHz.
+  static constexpr size_t kFrameSamples = 320;            // 20 ms at 16 kHz.
   static constexpr size_t kInitialSilenceSamples = 48000; // 3 seconds.
-  static constexpr size_t kHangoverSamples = 12800; // 800 ms.
+  static constexpr size_t kHangoverSamples = 80000;       // 5000 ms.
   static constexpr size_t kMinimumActivitySamples = 1920; // 120 ms.
   // Mean absolute PCM amplitude. Initial setting; tune on CoreS3.
-  static constexpr uint32_t kActivityThreshold = 500;
+  static constexpr uint32_t kActivityThreshold = 100;
 
   struct Clip
   {
-    const int16_t* samples = nullptr;
+    const int16_t *samples = nullptr;
     size_t sampleCount = 0;
   };
 
   RobotAudio() = default;
   ~RobotAudio();
-  RobotAudio(const RobotAudio&) = delete;
-  RobotAudio& operator=(const RobotAudio&) = delete;
-  RobotAudio(RobotAudio&&) = delete;
-  RobotAudio& operator=(RobotAudio&&) = delete;
+  RobotAudio(const RobotAudio &) = delete;
+  RobotAudio &operator=(const RobotAudio &) = delete;
+  RobotAudio(RobotAudio &&) = delete;
+  RobotAudio &operator=(RobotAudio &&) = delete;
 
   // A busy request is rejected without changing the current operation.
   bool startRecording();
@@ -71,14 +71,14 @@ private:
   friend class RobotTranscription;
 
   // Main-task only. Only the transport may release after worker acknowledgment.
-  bool borrowCompletedClip(Clip& clip);
+  bool borrowCompletedClip(Clip &clip);
   void releaseCompletedClip();
 
   static_assert(kMaxSampleCount * sizeof(int16_t) == 320000,
-      "The reusable PSRAM clip holds ten seconds of 16-bit mono PCM");
+                "The reusable PSRAM clip holds ten seconds of 16-bit mono PCM");
   static_assert(kMaxSampleCount % kFrameSamples == 0, "The cap ends on a frame");
 
-  int16_t* samples = nullptr;
+  int16_t *samples = nullptr;
   size_t sampleCount = 0;
   size_t processedSamples = 0;
   size_t activitySamples = 0;
@@ -97,7 +97,7 @@ private:
   uint32_t drainStartedAt = 0;
   uint32_t drainDurationMs = 0;
 
-  static void bufferReleased(void* context, void* data, size_t count);
+  static void bufferReleased(void *context, void *data, size_t count);
   void processRecording();
   void releaseHardware();
   bool fail(Error error);
