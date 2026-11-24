@@ -353,6 +353,49 @@ stage, commit, push, delegate or flash.
   queue behavior under Wi-Fi stalls, and memory headroom. Flashing via
   `pio run -e m5stack-cores3 -t upload` requires authorized device work.
 
+### T3. Three-second post-activity silence cutoff follow-up
+
+- **Baseline, dependency, and approval.** Started clean at
+  `1c72ff8eb5a7ff9d7f0e5786b989c905d5a82ed9` on
+  `feat/stream-audio-while-speaking`, after T1/T2. The user approved on
+  2026-11-24: “Approved and apply, also already tested the hardware and is
+  working as expected”.
+- **Current behavior and scope.** The shared
+  `RobotAudio::kHangoverSamples` is now 48,000 samples (3 seconds at 16 kHz),
+  applying to standalone and streaming capture. Initial quiet, activity
+  minimum, threshold, standalone ten-second cap, stream limits, and transport
+  timeouts stay unchanged. The five-second requirement and measurements above
+  document the original T1/T2 implementation; T3 supersedes only that current
+  pause length. README and test fixture descriptions now say three seconds.
+- **RED.** Before changing the production constant, both focused commands
+  exited **1** with the new 2.98/3.00-second boundary and tail expectations
+  failing against 80,000 samples. The cap-before-silence fixture passed in the
+  audio run.
+
+  - `/Users/france/.platformio/penv/bin/pio test -e native -f test_audio`
+  - `/Users/france/.platformio/penv/bin/pio test -e native -f test_stream`
+- **GREEN.** `/Users/france/.platformio/penv/bin/pio test -e native` exited
+  **0**, **49/49** cases passed. `/Users/france/.platformio/penv/bin/pio run
+  -e m5stack-cores3` exited **0** using the existing local configuration:
+  RAM **54,700 / 327,680 bytes**, flash **1,101,623 / 6,553,600 bytes**. The
+  build reported no project compilation warnings. `include/LocalConfig.h`
+  existed and was left untouched; no unconfigured build was run. No upload was
+  performed.
+- **Hardware report limits.** The user's report records that hardware testing
+  worked as expected, but gave no flashed revision, exact timing, or individual
+  scenarios. It does not establish three-second timing on device or exhaustive
+  streaming behavior. This follow-up makes no such claims.
+- **Status and review.** Completed with independent **PASS** in round **1 of
+  3**. The configured developer used `gpt-6-luna` with `xhigh` reasoning for
+  this small, specified change; the independently selected reviewer used
+  `gpt-6.1-sol` with `medium` reasoning for the timing and evidence check. The
+  reviewer reran all 49 native tests, the CoreS3 build, diff/whitespace and
+  changed-document link/path checks, and verified all six frozen file hashes.
+  No actionable findings remained. The implementer then added this review
+  record and checked that metadata-only amendment before the authorized
+  `fix(audio): shorten silence stop to three seconds` commit. No upload or
+  push was performed.
+
 ## Handoff
 
 - Implementation and task commits are authorized by the user's approval.

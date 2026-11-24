@@ -163,8 +163,10 @@ void test_seventy_seconds_wraps_ordered_pcm_and_result_clock_starts_after_captur
   TEST_ASSERT_EQUAL_UINT(1, fakeHeap().allocations);
   TEST_ASSERT_TRUE(session.audio.streamHighWaterFrames() <= RobotAudio::kStreamFrames);
   TEST_ASSERT_TRUE(session.socket.output.size() > 1920000); // Firmware imposes no backend length cap.
-  session.frames(250, 0);
-  expected.append(250 * RobotAudio::kFrameSamples * sizeof(int16_t), '\0');
+  session.frames(149, 0);
+  TEST_ASSERT_EQUAL_INT(static_cast<int>(AudioStatus::RECORDING), static_cast<int>(session.audio.status()));
+  session.frame(0);
+  expected.append(150 * RobotAudio::kFrameSamples * sizeof(int16_t), '\0');
   TEST_ASSERT_EQUAL_INT(static_cast<int>(AudioStatus::RECORDED), static_cast<int>(session.audio.status()));
   bool finalized;
   const std::string pcm = decoded(session.socket.output, finalized);
@@ -226,7 +228,8 @@ void test_exact_tail_excludes_unclassified_driver_tail_and_final_waits_for_join(
   Session session;
   session.start();
   session.frames(6, 100);
-  session.frames(249, 0);
+  session.frames(149, 0);
+  TEST_ASSERT_EQUAL_INT(static_cast<int>(AudioStatus::RECORDING), static_cast<int>(session.audio.status()));
   M5.Mic.release(0);
   for (unsigned i = 0; i < 4; ++i) M5.Mic.release(2000);
   M5.Mic.onEnd = [&]()
@@ -240,7 +243,7 @@ void test_exact_tail_excludes_unclassified_driver_tail_and_final_waits_for_join(
   bool finalized;
   const auto pcm = decoded(session.socket.output, finalized);
   TEST_ASSERT_TRUE(finalized);
-  TEST_ASSERT_EQUAL_UINT(256 * 640, pcm.size());
+  TEST_ASSERT_EQUAL_UINT(156 * 640, pcm.size());
   for (size_t i = 6 * 640; i < pcm.size(); ++i) TEST_ASSERT_EQUAL_UINT8(0, pcm[i]);
   session.acknowledge();
 }
@@ -252,7 +255,7 @@ void test_quiet_noise_and_minimum_cumulative_activity_cancel_or_finish_once()
     Session session;
     session.start();
     if (cycle % 2) session.frames(5, -32768);
-    session.frames(cycle % 2 ? 250 : 150, 0);
+    session.frames(150, 0);
     TEST_ASSERT_EQUAL_INT(static_cast<int>(AudioStatus::NO_SPEECH), static_cast<int>(session.audio.status()));
     assertError(Error::CANCELLED, session.upload);
     bool finalized;
@@ -265,15 +268,15 @@ void test_quiet_noise_and_minimum_cumulative_activity_cancel_or_finish_once()
   session.start();
   session.frames(149, 99); // Delayed onset just before initial quiet deadline.
   session.frames(3, 100);
-  session.frames(240, 0);
+  session.frames(149, 0); // The initial onset remains below the activity minimum.
   session.frames(3, -100); // Cumulative 120 ms, reset hangover.
-  session.frames(249, 0);
+  session.frames(149, 0);
   TEST_ASSERT_EQUAL_INT(static_cast<int>(AudioStatus::RECORDING), static_cast<int>(session.audio.status()));
   session.frames(1, 0);
   bool finalized;
   const auto pcm = decoded(session.socket.output, finalized);
   TEST_ASSERT_TRUE(finalized);
-  TEST_ASSERT_EQUAL_UINT((149 + 3 + 240 + 3 + 250) * 640, pcm.size());
+  TEST_ASSERT_EQUAL_UINT((149 + 3 + 149 + 3 + 150) * 640, pcm.size());
   session.acknowledge();
 }
 
@@ -360,7 +363,8 @@ void test_write_and_response_idle_deadlines_reset_on_progress_and_roll_over()
     Session session;
     session.start();
     session.frames(6, 1000);
-    session.frames(250, 0);
+    session.frames(149, 0);
+    session.frame(0);
     const uint32_t finalizedAt = fakeMillis();
     session.upload.update(finalizedAt + 24999, session.socket);
     TEST_ASSERT_FALSE(session.upload.done());
@@ -419,7 +423,7 @@ void test_success_response_begun_during_capture_stays_premature_across_final_chu
   Session session;
   session.start();
   session.frames(6, 1000);
-  session.frames(249, 0);
+  session.frames(149, 0);
   session.socket.incoming = "HTTP/1.1 200 OK"; // One frame before finalization, without CRLF.
   session.upload.update(fakeMillis(), session.socket);
   TEST_ASSERT_FALSE(session.upload.done());
@@ -444,7 +448,8 @@ void test_readable_first_response_obeys_exact_deadline_before_reading()
       Session session;
       session.start();
       session.frames(6, 1000);
-      session.frames(250, 0);
+      session.frames(149, 0);
+      session.frame(0);
       session.socket.respond();
       session.upload.update(fakeMillis() + wait, session.socket);
       assertError(wait == 25000 ? Error::TIMED_OUT : Error::NONE, session.upload);
@@ -468,7 +473,8 @@ void test_readable_response_remainder_obeys_exact_idle_deadline_before_reading()
       Session session;
       session.start();
       session.frames(6, 1000);
-      session.frames(250, 0);
+      session.frames(149, 0);
+      session.frame(0);
       session.socket.respond();
       const std::string response = session.socket.incoming;
       session.socket.incoming = response.substr(0, response.size() - 3); // Body is only "he".

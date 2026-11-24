@@ -34,15 +34,16 @@ second error. An already available final result still passes through THINKING.
 
 The eight bounded test_audio cases retain record/replay regression coverage:
 queued 20 ms frames, the exact ten-second standalone sample cap, initial quiet,
-cumulative activity, silence hangover/reset, energy boundaries, sample-count
-playback/borrowing, reusable clip allocation, failed allocation/start/refill,
+cumulative activity, the three-second silence hangover/reset, energy boundaries,
+sample-count playback/borrowing, reusable clip allocation, failed
+allocation/start/refill,
 retry, delayed driver callback, and joined capture-tail truncation. Their test
 access fixture reaches the private clip boundary without replacing production
 RobotTranscription with a competing class definition.
 
 The 12 test_stream cases use the real audio ring, upload helper and response
-parser. They verify 70 seconds of speech plus five seconds of exact silence tail
-with byte-for-byte little-endian PCM through ring wrap, a single 40,960-byte
+parser. They verify 70 seconds of speech plus three seconds of exact silence
+tail with byte-for-byte little-endian PCM through ring wrap, a single 40,960-byte
 allocation, and no firmware/backend-length cap in capture. They cover driver
 release before classification, partial PCM keeping a slot immutable, and slot
 requeue immediately after its last PCM byte, even before a stalled HTTP suffix or

@@ -39,7 +39,7 @@ public:
   static constexpr size_t kMaxSampleCount = 160000;
   static constexpr size_t kFrameSamples = 320;            // 20 ms at 16 kHz.
   static constexpr size_t kInitialSilenceSamples = 48000; // 3 seconds.
-  static constexpr size_t kHangoverSamples = 80000;       // 5000 ms.
+  static constexpr size_t kHangoverSamples = 48000;       // 3000 ms.
   static constexpr size_t kMinimumActivitySamples = 1920; // 120 ms.
   // Mean absolute PCM amplitude. Initial setting; tune on CoreS3.
   static constexpr uint32_t kActivityThreshold = 100;

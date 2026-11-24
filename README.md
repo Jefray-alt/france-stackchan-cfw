@@ -84,7 +84,7 @@ in `include/RobotState.h`.
 Update the [local backend](backend/README.md) before using this streaming firmware.
 It supports HTTP/1.1 chunked PCM while preserving fixed-length compatibility.
 Configure Wi-Fi as below. Tap while idle, then speak during the 16 kHz mono
-capture. Start within three seconds. Five consecutive seconds of silence after
+capture. Start within three seconds. Three consecutive seconds of silence after
 activity ends capture; shorter pauses keep it open. Leading and trailing audio
 through the exact silence-stop frame are sent in order while capture runs.
 There is no firmware duration or upload-length cap. The placeholder backend
