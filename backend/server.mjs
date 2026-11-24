@@ -7,6 +7,7 @@ import { pathToFileURL } from 'node:url';
 
 const MIN_PCM_BYTES = 3840;
 const MAX_PCM_BYTES = 320000;
+const MAX_STREAM_PCM_BYTES = 1920000;
 const TRANSCRIPT_BYTES = 2048;
 const OUTPUT_BYTES = TRANSCRIPT_BYTES + 64;
 
@@ -159,34 +160,51 @@ export function transcribe(pcm, config, {
   });
 }
 
-function receiveBody(request, signal, timeoutMs, expectedBytes)
+function receiveBody(request, signal, { timeoutMs, idleTimeoutMs, maxBytes, expectedBytes })
 {
   return new Promise((resolveBody, rejectBody) => {
-    const body = Buffer.alloc(expectedBytes);
+    const body = Buffer.alloc(maxBytes);
     let bytes = 0;
+    let finished = false;
+    let idleTimer;
     const finish = (error) => {
+      if (finished) return;
+      finished = true;
       clearTimeout(timer);
+      clearTimeout(idleTimer);
       request.removeListener('data', onData);
       request.removeListener('end', onEnd);
       request.removeListener('error', onError);
       signal.removeEventListener('abort', onAbort);
       if (error) rejectBody(error);
-      else resolveBody(body);
+      else resolveBody(body.subarray(0, bytes));
+    };
+    const resetIdle = () => {
+      clearTimeout(idleTimer);
+      if (idleTimeoutMs !== undefined)
+      {
+        idleTimer = setTimeout(() => finish(new RequestError(400, 'Recording body timed out')), idleTimeoutMs);
+      }
     };
     const onData = (chunk) => {
-      if (bytes + chunk.length > expectedBytes)
+      if (bytes + chunk.length > maxBytes)
       {
-        finish(new RequestError(400, 'Invalid recording length'));
+        finish(new RequestError(expectedBytes === undefined ? 413 : 400,
+          expectedBytes === undefined ? 'Recording too large' : 'Invalid recording length'));
         return;
       }
       chunk.copy(body, bytes);
       bytes += chunk.length;
+      resetIdle();
     };
-    const onEnd = () => finish(bytes === expectedBytes ? null : new RequestError(400, 'Invalid recording length'));
+    const onEnd = () => finish(request.complete && bytes >= MIN_PCM_BYTES && bytes % 2 === 0
+      && (expectedBytes === undefined || bytes === expectedBytes)
+      ? null : new RequestError(400, 'Invalid recording length'));
     const onError = () => finish(new RequestError(400, 'Invalid recording body'));
     const onAbort = () => finish(new RequestError(request.aborted ? 400 : 503,
       request.aborted ? 'Invalid recording body' : 'Request cancelled'));
     const timer = setTimeout(() => finish(new RequestError(400, 'Recording body timed out')), timeoutMs);
+    resetIdle();
     request.on('data', onData);
     request.once('end', onEnd);
     request.once('error', onError);
@@ -206,7 +224,8 @@ function sendText(response, status, text, close = false)
 }
 
 export function createTranscriptionServer(config, {
-  spawnProcess = spawn, bodyTimeoutMs = 5000, inferenceTimeoutMs = 20000, killGraceMs = 1000
+  spawnProcess = spawn, bodyTimeoutMs = 5000, streamBodyIdleTimeoutMs = 5000,
+  streamBodyTimeoutMs = 65000, inferenceTimeoutMs = 20000, killGraceMs = 1000
 } = {})
 {
   let active;
@@ -225,15 +244,17 @@ export function createTranscriptionServer(config, {
       return reject(415, 'Expected application/octet-stream');
     }
     const length = request.headers['content-length'];
-    if (request.headers['transfer-encoding'] !== undefined
-        || request.headers['content-encoding'] !== undefined
-        || !length || !/^[0-9]+$/.test(length))
+    const encoding = request.headers['transfer-encoding'];
+    const chunked = encoding?.trim().toLowerCase() === 'chunked' && request.httpVersion === '1.1';
+    if (request.headers['content-encoding'] !== undefined
+        || (encoding !== undefined && (!chunked || length !== undefined))
+        || (!chunked && (!length || !/^[0-9]+$/.test(length))))
     {
-      return reject(400, 'Expected even PCM Content-Length from 3840 to 320000');
+      return reject(400, 'Expected PCM Content-Length or HTTP/1.1 chunked body');
     }
-    if (Number(length) > MAX_PCM_BYTES) return reject(413, 'Recording too large');
-    const pcmBytes = Number(length);
-    if (pcmBytes < MIN_PCM_BYTES || pcmBytes % 2 !== 0)
+    const pcmBytes = chunked ? undefined : Number(length);
+    if (pcmBytes > MAX_PCM_BYTES) return reject(413, 'Recording too large');
+    if (!chunked && (pcmBytes < MIN_PCM_BYTES || pcmBytes % 2 !== 0))
     {
       return reject(400, 'Expected even PCM Content-Length from 3840 to 320000');
     }
@@ -250,7 +271,12 @@ export function createTranscriptionServer(config, {
     void (async () => {
       try
       {
-        const pcm = await receiveBody(request, controller.signal, bodyTimeoutMs, pcmBytes);
+        const pcm = await receiveBody(request, controller.signal, {
+          timeoutMs: chunked ? streamBodyTimeoutMs : bodyTimeoutMs,
+          idleTimeoutMs: chunked ? streamBodyIdleTimeoutMs : undefined,
+          maxBytes: chunked ? MAX_STREAM_PCM_BYTES : pcmBytes,
+          expectedBytes: pcmBytes
+        });
         const text = await transcribe(pcm, config, {
           signal: controller.signal, spawnProcess, inferenceTimeoutMs, killGraceMs
         });

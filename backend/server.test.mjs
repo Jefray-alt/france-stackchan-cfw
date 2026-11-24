@@ -128,13 +128,124 @@ async function waitUntil(predicate)
   assert.fail('Condition not reached');
 }
 
-function pendingRequest(app)
+function pendingRequest(app, chunked = false)
 {
   const req = request({ host: '127.0.0.1', port: app.port, method: 'POST', path: '/v1/transcriptions',
-    headers: { 'Content-Type': 'application/octet-stream', 'Content-Length': 64000 } });
+    headers: { 'Content-Type': 'application/octet-stream',
+      ...(chunked ? { 'Transfer-Encoding': 'chunked' } : { 'Content-Length': 64000 }) } });
   req.on('error', () => {});
   return req;
 }
+
+function responseFor(req)
+{
+  return new Promise((resolve) => req.on('response', async (response) => {
+    const chunks = [];
+    for await (const chunk of response) chunks.push(chunk);
+    resolve({ status: response.statusCode, body: Buffer.concat(chunks).toString() });
+  }));
+}
+
+test('chunked PCM arrives during an open pause and infers once only after the final chunk', async (t) => {
+  let calls = 0;
+  let receivedBytes = 0;
+  let answered = false;
+  const body = Buffer.alloc(320640);
+  for (let i = 0; i < body.length; i++) body[i] = i % 251;
+  const app = await start(t, { spawnProcess: fixture(`
+    import assert from 'node:assert/strict';
+    const chunks = [];
+    for await (const chunk of process.stdin) chunks.push(chunk);
+    const wav = Buffer.concat(chunks);
+    assert.equal(wav.length, 320684);
+    assert.equal(wav.readUInt32LE(40), 320640);
+    for (let i = 0; i < 320640; i++) assert.equal(wav[i + 44], i % 251);
+    process.stdout.write('stream complete');
+  `, () => { calls++; }) });
+  app.server.prependListener('request', (req) => {
+    if (req.headers['transfer-encoding'] === 'chunked')
+    {
+      assert.equal(req.headers['content-length'], undefined);
+      req.on('data', (chunk) => { receivedBytes += chunk.length; });
+    }
+  });
+  const req = request({ host: '127.0.0.1', port: app.port, method: 'POST', path: '/v1/transcriptions',
+    headers: { 'Content-Type': 'application/octet-stream', 'Transfer-Encoding': 'chunked' } });
+  t.after(() => req.destroy());
+  req.on('error', () => {});
+  const result = new Promise((resolve) => req.on('response', async (response) => {
+    answered = true;
+    const chunks = [];
+    for await (const chunk of response) chunks.push(chunk);
+    resolve({ status: response.statusCode, body: Buffer.concat(chunks).toString() });
+  }));
+  req.write(body.subarray(0, 1));
+  req.write(body.subarray(1, 640)); // HTTP chunks may split a PCM sample.
+  await waitUntil(() => receivedBytes === 640);
+  await delay(20);
+  assert.equal(answered, false, 'an open valid stream must remain admitted');
+  assert.equal(calls, 0, 'received PCM must not launch inference before completion');
+  assert.equal((await post(app)).status, 503, 'streaming and fixed-length requests share admission');
+  req.write(body.subarray(640));
+  await waitUntil(() => receivedBytes === body.length);
+  assert.equal(calls, 0, 'all PCM without the final HTTP chunk is still incomplete');
+  req.end();
+  assert.deepEqual(await result, { status: 200, body: 'stream complete' });
+  assert.equal(calls, 1);
+});
+
+test('chunked minimum and exact 60-second maximum preserve the WAV and every PCM byte', async (t) => {
+  for (const length of [3840, 1920000])
+  {
+    await t.test(String(length), async (t) => {
+      const body = Buffer.alloc(length);
+      for (let i = 0; i < length; i++) body[i] = i % 251;
+      const app = await start(t, { spawnProcess: fixture(`
+        import assert from 'node:assert/strict';
+        const chunks = [];
+        for await (const chunk of process.stdin) chunks.push(chunk);
+        const wav = Buffer.concat(chunks);
+        assert.equal(wav.length, ${length} + 44);
+        assert.equal(wav.readUInt32LE(4), ${length} + 36);
+        assert.equal(wav.readUInt32LE(40), ${length});
+        for (let i = 0; i < ${length}; i++) assert.equal(wav[i + 44], i % 251);
+        process.stdout.write('bounded stream');
+      `) });
+      const result = await post(app, body, { 'Content-Length': undefined, 'Transfer-Encoding': 'chunked' });
+      assert.deepEqual({ status: result.status, body: result.body }, { status: 200, body: 'bounded stream' });
+    });
+  }
+});
+
+test('one sample above the stream maximum receives live 413 before the final chunk and releases admission', { timeout: 2000 }, async (t) => {
+  let calls = 0;
+  const app = await start(t, { spawnProcess: fixture(`
+    for await (const chunk of process.stdin) {}
+    process.stdout.write('retry');
+  `, () => { calls++; }) });
+  const req = pendingRequest(app, true);
+  t.after(() => req.destroy());
+  const result = responseFor(req);
+  req.write(Buffer.alloc(1920000));
+  req.write(Buffer.alloc(2));
+  assert.equal((await result).status, 413);
+  assert.equal(req.writableEnded, false, 'server rejects without waiting for a final HTTP chunk');
+  assert.equal(calls, 0);
+  assert.equal((await post(app)).body, 'retry');
+  assert.equal(calls, 1);
+});
+
+test('completed empty, undersized and odd chunked bodies never infer', async (t) => {
+  let calls = 0;
+  const app = await start(t, { spawnProcess: () => { calls++; throw new Error('must not spawn'); } });
+  for (const length of [0, 2, 3838, 3839, 3841, 64001])
+  {
+    assert.equal((await post(app, Buffer.alloc(length), {
+      'Content-Length': undefined, 'Transfer-Encoding': 'chunked'
+    })).status, 400);
+  }
+  assert.equal(calls, 0);
+});
 
 test('valid empty, split multibyte, and maximum-size transcripts', async (t) => {
   for (const [name, bytes, expected] of [
@@ -172,7 +283,6 @@ test('invalid media, length, framing, paths and methods never launch a process',
     [Buffer.alloc(320001), {}, 'POST', '/v1/transcriptions', 413],
     [pcm, { 'Content-Encoding': 'gzip' }, 'POST', '/v1/transcriptions', 400],
     [Buffer.alloc(0), { 'Content-Length': undefined }, 'POST', '/v1/transcriptions', 400],
-    [pcm, { 'Content-Length': undefined, 'Transfer-Encoding': 'chunked' }, 'POST', '/v1/transcriptions', 400],
     [Buffer.alloc(0), {}, 'GET', '/v1/transcriptions', 405],
     [Buffer.alloc(0), {}, 'POST', '/other', 404]
   ])
@@ -202,10 +312,17 @@ test('short transport bodies at minimum, legacy and maximum lengths never infer'
 test('ambiguous or malformed raw framing never launches inference', async (t) => {
   let calls = 0;
   const app = await start(t, { spawnProcess: () => { calls++; throw new Error('must not spawn'); } });
-  for (const framing of [
-    'Content-Length: 3840\r\nContent-Length: 3840',
-    'Content-Length: 3840\r\nTransfer-Encoding: chunked',
-    'Content-Length: -2', 'Content-Length: 3.5', 'Content-Length: invalid'
+  for (const [framing, body = '', version = '1.1'] of [
+    ['Content-Length: 3840\r\nContent-Length: 3840'],
+    ['Content-Length: 3840\r\nTransfer-Encoding: chunked'],
+    ['Content-Length: -2'], ['Content-Length: 3.5'], ['Content-Length: invalid'],
+    ['Transfer-Encoding: gzip'], ['Transfer-Encoding: gzip, chunked'],
+    ['Transfer-Encoding: chunked, gzip'],
+    ['Transfer-Encoding: chunked\r\nTransfer-Encoding: chunked'],
+    ['Transfer-Encoding: chunked\r\nContent-Encoding: gzip'],
+    ['Transfer-Encoding: chunked', 'not-hex\r\n'],
+    ['Transfer-Encoding: chunked', '4\r\nabcdX\r\n0\r\n\r\n'],
+    ['Transfer-Encoding: chunked', '0\r\n\r\n', '1.0']
   ])
   {
     const socket = connect({ host: '127.0.0.1', port: app.port });
@@ -213,10 +330,89 @@ test('ambiguous or malformed raw framing never launches inference', async (t) =>
     let response = '';
     socket.on('data', (chunk) => { response += chunk.toString(); });
     await once(socket, 'connect');
-    socket.end(`POST /v1/transcriptions HTTP/1.1\r\nHost: localhost\r\nContent-Type: application/octet-stream\r\n${framing}\r\n\r\n`);
+    socket.end(`POST /v1/transcriptions HTTP/${version}\r\nHost: localhost\r\nContent-Type: application/octet-stream\r\n${framing}\r\n\r\n${body}`);
     await once(socket, 'end');
     assert.match(response, /^HTTP\/1\.1 400 /);
   }
+  assert.equal(calls, 0);
+});
+
+test('truncated chunks and missing terminal chunks discard PCM and release admission', async (t) => {
+  let calls = 0;
+  const app = await start(t, { spawnProcess: fixture(`
+    for await (const chunk of process.stdin) {}
+    process.stdout.write('retry');
+  `, () => { calls++; }) });
+  for (const body of ['f00\r\nshort', `f00\r\n${'a'.repeat(3840)}\r\n`,
+    `f00\r\n${'a'.repeat(3840)}\r\n0\r\n`])
+  {
+    const before = calls;
+    const socket = connect({ host: '127.0.0.1', port: app.port, allowHalfOpen: true });
+    t.after(() => socket.destroy());
+    let response = '';
+    socket.on('data', (chunk) => { response += chunk.toString(); });
+    await once(socket, 'connect');
+    socket.end(`POST /v1/transcriptions HTTP/1.1\r\nHost: localhost\r\nContent-Type: application/octet-stream\r\nTransfer-Encoding: chunked\r\n\r\n${body}`);
+    await once(socket, 'end');
+    assert.match(response, /^HTTP\/1\.1 400 /);
+    assert.equal(calls, before);
+    assert.equal((await post(app)).body, 'retry');
+  }
+});
+
+test('chunked idle deadline resets on PCM progress and releases admission after a stalled body', { timeout: 2000 }, async (t) => {
+  let calls = 0;
+  let answered = false;
+  const app = await start(t, { streamBodyIdleTimeoutMs: 100, streamBodyTimeoutMs: 500,
+    spawnProcess: fixture(`
+      for await (const chunk of process.stdin) {}
+      process.stdout.write('retry');
+    `, () => { calls++; }) });
+  const req = pendingRequest(app, true);
+  t.after(() => req.destroy());
+  const result = responseFor(req).then((value) => { answered = true; return value; });
+  req.write(pcm.subarray(0, 640));
+  await delay(65);
+  req.write(pcm.subarray(640, 1280));
+  await delay(65);
+  assert.equal(answered, false, 'progress resets the idle deadline beyond the initial deadline');
+  assert.equal((await post(app)).status, 503);
+  assert.equal((await result).status, 400);
+  assert.equal(calls, 0);
+  assert.equal((await post(app)).body, 'retry');
+});
+
+test('chunked total deadline expires despite continuing body progress', { timeout: 2000 }, async (t) => {
+  let calls = 0;
+  const app = await start(t, { streamBodyIdleTimeoutMs: 100, streamBodyTimeoutMs: 180,
+    spawnProcess: fixture(`
+      for await (const chunk of process.stdin) {}
+      process.stdout.write('retry');
+    `, () => { calls++; }) });
+  const req = pendingRequest(app, true);
+  t.after(() => req.destroy());
+  const result = responseFor(req);
+  req.write(pcm.subarray(0, 640));
+  const timer = setInterval(() => req.write(pcm.subarray(0, 640)), 30);
+  t.after(() => clearInterval(timer));
+  assert.equal((await result).status, 400);
+  clearInterval(timer);
+  assert.equal(calls, 0);
+  assert.equal((await post(app)).body, 'retry');
+});
+
+test('fixed-length deadline remains total even when body data keeps arriving', async (t) => {
+  let calls = 0;
+  const app = await start(t, { bodyTimeoutMs: 100,
+    spawnProcess: () => { calls++; throw new Error('must not spawn'); } });
+  const req = pendingRequest(app);
+  t.after(() => req.destroy());
+  const result = responseFor(req);
+  req.write(pcm.subarray(0, 640));
+  const timer = setInterval(() => req.write(pcm.subarray(0, 640)), 20);
+  t.after(() => clearInterval(timer));
+  assert.equal((await result).status, 400);
+  clearInterval(timer);
   assert.equal(calls, 0);
 });
 
@@ -235,15 +431,41 @@ test('body deadline holds admission, closes slow input and permits retry', async
 });
 
 test('client disconnect while receiving a body releases admission without spawning', async (t) => {
-  const app = await start(t, { spawnProcess: outputFixture('retry') });
-  const req = pendingRequest(app);
-  req.write(pcm.subarray(0, 8));
-  await delay(15);
-  assert.equal((await post(app)).status, 503);
-  req.destroy();
-  await waitUntil(() => req.destroyed);
-  await delay(15);
-  assert.equal((await post(app)).body, 'retry');
+  for (const chunked of [false, true])
+  {
+    let calls = 0;
+    let received = false;
+    const app = await start(t, { spawnProcess: fixture(`
+      for await (const chunk of process.stdin) {}
+      process.stdout.write('retry');
+    `, () => { calls++; }) });
+    app.server.prependListener('request', (req) => req.once('data', () => { received = true; }));
+    const req = pendingRequest(app, chunked);
+    req.write(pcm.subarray(0, 3840));
+    await waitUntil(() => received);
+    assert.equal((await post(app)).status, 503);
+    req.destroy();
+    await delay(15);
+    assert.equal(calls, 0, 'disconnect without normal completion must not infer');
+    assert.equal((await post(app)).body, 'retry');
+    assert.equal(calls, 1);
+  }
+});
+
+test('shutdown cancels an open chunked body without inference', async (t) => {
+  let calls = 0;
+  let received = false;
+  const app = await start(t, { spawnProcess: () => { calls++; throw new Error('must not spawn'); } });
+  app.server.prependListener('request', (req) => req.once('data', () => { received = true; }));
+  const req = pendingRequest(app, true);
+  t.after(() => req.destroy());
+  const result = responseFor(req);
+  req.write(pcm.subarray(0, 3840));
+  await waitUntil(() => received);
+  const closing = app.close();
+  assert.equal((await result).status, 503);
+  await closing;
+  assert.equal(calls, 0);
 });
 
 test('spawn throw, missing executable, nonzero and early process exits are sanitized', async (t) => {
