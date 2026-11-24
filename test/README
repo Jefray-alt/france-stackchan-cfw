@@ -14,8 +14,9 @@ dependency on the first run. No CoreS3 is needed and this command never uploads.
 The test_controller suite uses Unity. setUp() creates a fresh RobotStateMachine
 value for each test; timestamps are explicit uint32_t millisecond values and
 press inputs are individual events, not held-touch levels. No real sleeps or
-hardware mocks are used. The native build_src_filter compiles only the production
-RobotStateMachine.cpp; Arduino main, RobotController, FaceRenderer, and M5Unified
+hardware mocks are used. The native build_src_filter compiles the production
+RobotStateMachine.cpp and TranscriptionProtocol.cpp; Arduino main,
+RobotController, RobotAudio, RobotTranscription, FaceRenderer, and M5Unified
 are excluded. The firmware builds the same helper and supplies millis() and
 M5.Touch.getDetail().wasPressed() at its hardware boundary.
 
@@ -29,6 +30,15 @@ at current uptime are covered. begin(now) now resets to idle and starts its cloc
 at now; public state setters were removed to keep audio and face state aligned.
 Simulated FAILED inputs represent initialization, request, or stopped-driver
 failures. They do not test M5Unified calls. See docs/plan/audio-record-replay.md.
+
+The test_transcription suite exercises the same bounded HTTP parser used by
+the worker, without a socket or RTOS mock. It covers numeric IPv4 base URLs,
+fragmented multilingual UTF-8, empty/max-size results and embedded NUL lengths,
+HTTP rejection/redirects, incomplete bodies, malformed or ambiguous framing,
+media/encoding rejection, fixed header/line/body limits, canary-protected output,
+and invalid/overlong/surrogate/out-of-range UTF-8. It does not establish socket
+cleanup, task allocation, clip ownership under real concurrency, Wi-Fi memory
+use or device timing. Those remain CoreS3 checks in the tap-to-transcribe plan.
 
 Firmware compile check (also no upload):
 

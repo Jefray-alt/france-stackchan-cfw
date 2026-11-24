@@ -16,7 +16,7 @@ RobotAudio::~RobotAudio()
 
 bool RobotAudio::startRecording()
 {
-  if (currentStatus == Status::RECORDING || currentStatus == Status::PLAYING)
+  if (clipBorrowed || currentStatus == Status::RECORDING || currentStatus == Status::PLAYING)
   {
     return false;
   }
@@ -42,7 +42,7 @@ bool RobotAudio::startRecording()
 
 bool RobotAudio::startPlayback()
 {
-  if (currentStatus != Status::RECORDED)
+  if (clipBorrowed || currentStatus != Status::RECORDED)
   {
     return false;
   }
@@ -121,6 +121,11 @@ void RobotAudio::update(uint32_t now)
 
 void RobotAudio::stop()
 {
+  if (clipBorrowed)
+  {
+    return;
+  }
+
   releaseHardware();
   currentStatus = Status::IDLE;
   currentError = Error::NONE;
@@ -142,4 +147,22 @@ bool RobotAudio::fail(Error error)
   currentStatus = Status::FAILED;
   drainingPlayback = false;
   return false;
+}
+
+bool RobotAudio::borrowCompletedClip(Clip& clip)
+{
+  if (clipBorrowed || currentStatus != Status::RECORDED)
+  {
+    return false;
+  }
+
+  clipBorrowed = true;
+  clip.samples = samples;
+  clip.sampleCount = kSampleCount;
+  return true;
+}
+
+void RobotAudio::releaseCompletedClip()
+{
+  clipBorrowed = false;
 }

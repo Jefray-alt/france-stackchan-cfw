@@ -387,7 +387,146 @@ require hardware checks after integration in T3. Neither command uploads.
 
 **Proposed commit if authorized:** `feat(network): add bounded transcription transport`
 
-**Status and evidence:** Pending; no firmware implementation or checks run.
+**Status and evidence:** Complete; independent review PASS in round 1 of 3.
+Committed with the proposed T2 subject after the checks and review below.
+No T3 interaction changes. Approval is the 2026-11-24 record below.
+
+- T2 baseline: `feat/tap-to-transcribe` at
+  `771f260066b3a1d29e740f227a460e4153703952` in the approved dedicated worktree.
+  Startup checks exited 0; the only unrelated local file was untracked
+  `.DS_Store`, preserved and excluded. T1 is the committed dependency.
+- Developer runtime: `gpt-6.1-sol` / `xhigh`, selected for concurrent worker/clip
+  ownership, bounded framing, deadlines and cleanup. No delegation, staging,
+  commit, push or upload by the developer. The coordinator owns task commits
+  after independent review.
+- Scope/ownership refinement: add focused `include/TranscriptionProtocol.h`,
+  `src/TranscriptionProtocol.cpp`, `test/test_transcription/test_main.cpp`,
+  minimal native source/test filters in `platformio.ini`, and `test/README`.
+  These test the actual production parser and numeric URL decisions without
+  pretending that socket/RTOS mocks prove device behavior. Other owned files
+  remain the transport, audio clip access, local example/ignore entry, README
+  setup and T2 evidence. No controller, renderer, state, main, gains, speaker
+  settings, dependencies or platform versions changed.
+- The main-task API explicitly initializes, submits and polls one persistent
+  worker. Queues, one result buffer and parser storage are bounded; the task's
+  6,144-byte stack is allocated once and allocation failures are reported.
+  Network types remain inside the transport implementation. Merely compiling
+  or constructing the transport starts no networking; it remains unused until
+  T3. Wi-Fi association/reconnect attempts are worker-scheduled every ten
+  seconds, with no main-task wait; disconnected submissions fail immediately.
+- Only a completed recording may be borrowed, read-only, from the existing
+  64,000-byte audio buffer. Recording, playback and stop cannot invalidate it
+  while borrowed. A result token is published only after socket cleanup, and
+  only the main task's poll copies the result and releases the clip. A logical
+  interaction timeout cannot release it or admit a new recording. Request IDs
+  and explicit transcript byte length allow T3 to discard stale results and
+  print UTF-8 containing NUL without C-string truncation.
+- Source-driven transport choice, accepted by the coordinator within the
+  approved bounds: installed `HTTPClient.cpp::handleHeaderResponse()` uses
+  growing `String`/`readStringUntil` and per-progress idle timeouts. Installed
+  `Network/src/NetworkClient.cpp::write()` has ten one-second select retries
+  that reset after partial progress; `connect()` also has unchecked internal
+  allocations and setsockopt error returns before socket ownership/close.
+  Therefore a small worker-local lwIP socket performs numeric IPv4,
+  nonblocking connect/send/recv, always retaining its descriptor through close.
+  This adds no HTTP framework, DNS lookup, third-party dependency or platform
+  upgrade. Every request has one-second connect, five-second upload/progress
+  idle, 25-second first-response and shared 30-second elapsed deadlines.
+  There are no redirects or automatic request retries. Headers are capped at
+  1,024 total bytes and 255 per line; exact Content-Length/plain UTF-8 text is
+  capped at 2,048 bytes, with no transfer/content encoding or silent truncation.
+- Cleanup limits: installed ESP-IDF headers report 5.5.5; CoreS3 sdkconfig
+  disables `LWIP_SO_LINGER`, so no unsupported linger option is set. The
+  matching IDF v5.5.5 lwIP submodule is
+  `fd432e4ee2cfb7f7f1c7eb7227e0173412e7b84e`;
+  [its close implementation](https://github.com/espressif/esp-lwip/blob/fd432e4ee2cfb7f7f1c7eb7227e0173412e7b84e/src/api/api_msg.c)
+  uses `SO_SNDTIMEO` (five seconds here) for FIN-allocation waits on memory
+  shortage, with 500 ms polling; its header default is 20 seconds without a
+  send timeout. These source-level waits plus SDK scheduling are not a measured
+  hard bound. Direct `lwip_close` bypasses VFS bookkeeping: it frees the
+  descriptor only after successful prepare-delete, and retains it on failure.
+  Close finishes before acknowledgment; an exceptional close error
+  retains ownership and retries cleanup instead of granting new admission.
+  Thus cleanup can outlast the logical deadline, and a stuck SDK may leave
+  admission held. Actual close latency/resource reuse remain hardware checks.
+- Meaningful RED: `/Users/france/.platformio/penv/bin/pio test -e native`
+  exited 1 against an inert protocol scaffold. The existing 12 controller
+  cases passed and all seven new protocol cases failed (the harness also
+  reported SIGEMT after the failures). Failures establish numeric URL
+  acceptance, fragmented multilingual/empty UTF-8, exact/max-size bodies and
+  NUL length, incomplete/non-200 response behavior, malformed/ambiguous media
+  or framing, fixed storage limits and invalid UTF-8. The scaffold was replaced
+  only after this run. GREEN: the same command exited 0, 19/19 cases, initially
+  1.530 seconds and finally 1.826 seconds after style/canary refinements.
+  No failing docs/config test was invented; appropriate checks are below.
+- Firmware compile checks use `/Users/france/.platformio/penv/bin/pio run -e
+  m5stack-cores3` (no upload). Missing configuration and a temporary exact copy
+  of `LocalConfig.example.h` both passed, exit 0, at 25.191 and 24.754 seconds;
+  RAM 96,596/327,680 (29.5%), flash 610,855/6,553,600 (9.3%). The placeholder
+  local copy was removed in `finally`; no real credentials were used. Because
+  T2 remains unused, linker garbage collection omits the networking path from
+  these final images; those sizes are not integrated Wi-Fi headroom.
+- A separate example-config link probe retained `begin`, `submit` and `poll`
+  with linker undefined-symbol flags, exit 0, 24.023 seconds: RAM
+  116,524/327,680 (35.6%), flash 1,101,935/6,553,600 (16.8%). This verifies the
+  complete transport links without wiring it into the interaction or running
+  networking. After the direct-close correction, final missing-config build
+  passed (exit 0, 16.272 seconds; same ordinary-image sizes) and the retained
+  example probe passed (exit 0, 23.830 seconds; RAM 116,524, flash 1,101,931).
+  Only a comment was clarified after these compiles; runtime code is identical.
+  The probe does not include runtime task/Wi-Fi heap use. The exact
+  temporary procedure, with cleanup even on failure, was:
+
+  ```sh
+  python3 - <<'PYPROBE'
+  from pathlib import Path
+  import os, subprocess
+  p = Path('include/LocalConfig.h')
+  assert not p.exists(), 'preserve existing local configuration'
+  env = os.environ.copy()
+  env['PLATFORMIO_BUILD_FLAGS'] = '-D ARDUINO_USB_MODE=1 -D ARDUINO_USB_CDC_ON_BOOT=1 -Wl,-u,_ZN18RobotTranscription5beginEv -Wl,-u,_ZN18RobotTranscription6submitER10RobotAudiom -Wl,-u,_ZN18RobotTranscription4pollERNS_6ResultE'
+  try:
+      p.write_bytes(Path('include/LocalConfig.example.h').read_bytes())
+      result = subprocess.run(['/Users/france/.platformio/penv/bin/pio', 'run', '-e', 'm5stack-cores3'], env=env)
+  finally:
+      p.unlink()
+  raise SystemExit(result.returncode)
+  PYPROBE
+  ```
+
+- Resolved versions from `pio pkg list -e m5stack-cores3` (exit 0): espressif32
+  8.0.0, framework-arduinoespressif32 4.30312.261116 (Arduino 3.3.12), CoreS3
+  framework libs 3.3.12, M5Unified/M5GFX 0.3.0, Xtensa/RISC-V toolchains
+  14.2.0+20260121, esptool package 2.50400.0 (tool 5.4.0); native Unity 2.6.1.
+  Dependency versions remain unpinned. The build emitted two existing M5GFX
+  unused-variable warnings; no project compile error or new project warning.
+- Final documentation/configuration checks passed (exit 0):
+  `python3 /Users/france/.cache/stackchan-t2-evidence/docs-config-check.py`
+  checks all 13 owned files including untracked content for whitespace/final
+  newline, Markdown fences and relative link targets, secret/example ignore
+  behavior, removal of the temporary config, preserved `.DS_Store`, and no
+  controller/state/main/renderer/gain changes. `git diff --check` passed.
+  An earlier inspection assertion matched SO_LINGER in a comment rather than
+  a setsockopt call; the assertion was narrowed and rerun successfully.
+  The cache directory contains the complete tracked/untracked candidate patch,
+  file-hash manifest, exact check summary and final example build log, outside
+  the disposable worktree. No actual credentials or `.DS_Store` enter them.
+- Hardware is unavailable and no upload was authorized. Real concurrent clip
+  borrowing/release, failure/allocation paths, Wi-Fi association and recovery,
+  socket latency/cleanup, worker stack high-water mark, free heap over repeated
+  requests, microphone quality and retained record/replay need device checks.
+  Parser tests and builds do not establish those observations. T3 must keep
+  polling after logical timeout, reject new captures until acknowledgment,
+  discard stale IDs and print using the supplied byte length.
+
+- Independent review: `code_reviewer`, `gpt-6.1-sol` / `xhigh`, selected for
+  socket timing, RTOS ownership, bounded parsing and release handoff. Round 1
+  of 3 returned PASS with no findings. The reviewer independently verified all
+  13 frozen files/hashes, 19/19 native tests, missing-config firmware build
+  (RAM 96,596; flash 610,855), configured transport link probe (RAM 116,524;
+  flash 1,101,931), whitespace and documentation/configuration checks. No source
+  edits or uploads occurred; device-only limitations remain as recorded above.
+- T2 commit subject: `feat(network): add bounded transcription transport`.
 
 ### T3: Connect tap recording to transcript results
 
@@ -466,8 +605,8 @@ If unavailable, record these as pending rather than marking full validation.
 ## Handoff
 
 - Plan prepared, revised for local Whisper, and approved on 2026-11-24.
-- T1 is complete with its separate backend commit and independent PASS.
-  T2/T3 remain pending; include their evidence with their separate task commits.
+- T1 (`771f260`) and T2 are complete with separate task commits and independent
+  PASS verdicts. T3 remains pending; include its evidence with its task commit.
 - Implement in the dedicated worktree, then remove it after clean committed
   completion and return the original checkout to the feature branch.
 - Retain the original audio validation record as historical evidence. Use this

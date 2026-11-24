@@ -14,6 +14,8 @@ AI remains a future candidate.
 - `src/RobotController.cpp`: touch input, rendering, and state-change logging.
 - `src/RobotStateMachine.cpp`: hardware-independent state and inactivity decisions.
 - `src/RobotAudio.cpp`: fixed PCM buffer and exclusive microphone/speaker lifecycle.
+- `src/RobotTranscription.cpp`: bounded Wi-Fi/socket worker, not yet wired to taps.
+- `src/TranscriptionProtocol.cpp`: fixed-size HTTP framing and UTF-8 validation.
 - `src/FaceRenderer.cpp`: face drawing and blink timing.
 - `include/`: project headers and the shared `RobotState` enum.
 - `lib/`: project-specific libraries; currently contains a placeholder README.
@@ -86,6 +88,53 @@ The [audio validation record](docs/plan/audio-record-replay.md#hardware-validati
 records the user's confirmation that audio is working on CoreS3. Individual
 checklist observations, including cycle counts and failure recovery, were not
 supplied; the plan retains the scenarios for future regression checks.
+
+### Local transcription transport setup
+
+The local transcription transport is available for integration, but taps still
+record and replay. Constructing it starts no Wi-Fi; the controller does not yet
+call its explicit `begin()` or submit clips. The disposable
+[backend setup](backend/README.md) describes installing local Whisper, choosing
+a model and starting the Node service. Inference needs no internet after setup.
+
+Copy the firmware example and edit only the ignored local copy:
+
+```sh
+cp include/LocalConfig.example.h include/LocalConfig.h
+```
+
+Set `ROBOT_WIFI_SSID`, `ROBOT_WIFI_PASSWORD` (empty for an open network), and
+`ROBOT_TRANSCRIPTION_BASE_URL`. The URL must be `http://` plus the computer's
+numeric LAN IPv4 address, an optional port, and an optional trailing slash;
+for example `http://192.168.1.23:3000`. Paths, queries, hostnames, HTTPS and
+redirects are unsupported. Bind the backend to the computer's LAN address or
+`0.0.0.0` as described in its README. `localhost` on CoreS3 refers to CoreS3,
+not the computer. This plain HTTP path is for a trusted LAN. Never commit
+`include/LocalConfig.h` or real Wi-Fi credentials; only the placeholder example
+is tracked. Missing configuration still compiles and the transport reports
+unconfigured when initialized; the existing face/audio interaction is usable.
+
+After integration, one persistent worker schedules Wi-Fi attempts every ten
+seconds without waiting for association in the main loop. A disconnected
+submission fails immediately. There is one request and one result slot; the
+worker borrows the existing 64,000-byte PCM buffer instead of copying it. The
+main task must keep polling results even after an interaction times out: only
+an acknowledgment after socket close releases the clip for a new recording.
+The response includes an ID and explicit UTF-8 byte length so stale results can
+be discarded and embedded NUL does not silently shorten Serial output.
+
+The direct nonblocking socket has a one-second connection limit, a five-second
+upload/response-progress idle limit, a 25-second first-response wait for local
+inference, and a shared 30-second request deadline. No redirects or automatic
+request retries are performed. HTTP headers are limited to 1,024 bytes total
+and 255 bytes per line; successful plain UTF-8 text is limited to 2,048 bytes,
+with explicit Content-Length and no transfer/content encoding. Socket close
+finishes before result publication. The installed SDK disables SO_LINGER;
+close can wait beyond the 30-second interaction deadline. An exceptional close
+failure keeps the worker and clip occupied while it retries cleanup. Actual
+SDK latency, worker stack/heap headroom, Wi-Fi behavior and repeated requests
+still require CoreS3 checks. A logical timeout does not establish that the
+worker has released the clip.
 
 ### Verification
 
