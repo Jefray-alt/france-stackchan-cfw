@@ -1,4 +1,3 @@
-
 Firmware tests on the host
 ============================
 
@@ -11,61 +10,80 @@ For the standard IDE installation, use ~/.platformio/penv/bin/pio instead of
 pio if it is not on PATH. PlatformIO downloads its native platform and Unity
 dependency on the first run. No CoreS3 is needed and this command never uploads.
 
-The test_controller suite uses Unity. setUp() creates a fresh RobotStateMachine
-value for each test; timestamps are explicit uint32_t millisecond values and
-press inputs are individual events, not held-touch levels. No real sleeps or
-hardware mocks are used by this suite. The native build_src_filter compiles
-production RobotStateMachine.cpp, TranscriptionProtocol.cpp and RobotAudio.cpp;
-Arduino main, RobotController, RobotTranscription, FaceRenderer and real
-M5Unified are excluded. Audio uses the native-only test/support driver/heap
-fixtures through an include path configured only in the native environment.
-The firmware builds the same helper and supplies millis() and
-M5.Touch.getDetail().wasPressed() at its hardware boundary.
+The native build compiles production RobotStateMachine.cpp, RobotAudio.cpp,
+TranscriptionProtocol.cpp and TranscriptionUpload.cpp. It excludes Arduino main,
+RobotController, the RobotTranscription RTOS/socket adapter, FaceRenderer and real
+M5Unified. Audio uses test/support driver/heap/clock fixtures only in the native
+include path. TranscriptionUpload uses the same nonblocking I/O interface in the
+real socket worker and the native socket fixture. Tests exercise actual ring,
+HTTP chunk framing, partial-write offsets, concurrent response parsing and
+cancellation decisions; they do not duplicate those production algorithms.
 
-The 19 controller cases cover readiness rejection without capturing, ten
-capture/submit/result cycles with once-only action signals, empty results,
-busy/held presses, and presses coincident with completion or late cleanup.
-They exercise capture's 10999/11000 ms and transcription's 29999/30000 ms
-boundaries, finalized capture precedence, once-only no-speech with no upload,
-independent watchdog clocks, unsigned rollover, immediate admission
-and worker failures, stale/late request IDs, and capture admission held until
-transport acknowledgment. Playback facts cannot enter a speaking phase.
-Idle-only sleep, repeated wake-to-idle, fresh-press recording, initialization,
-and completion/failure inactivity refresh are covered. Pure readiness, pending,
-ID and result facts carry no networking types across the native boundary.
-See docs/plan/tap-to-transcribe.md for the accepted interaction and device checks.
+The 22 controller cases use explicit uint32_t timestamps and individual press
+events, with no real sleeps. They cover readiness rejection, ten repeated
+capture/result cycles, busy/held presses, idle-only sleep, repeated wake/fresh
+presses, once-only finalization/completion/failure signals, stale/late IDs,
+acknowledgment-coincident busy taps, and admission held during cleanup. Capture
+progress continues for 70 simulated seconds, then times out at 1000 ms without
+a completed microphone frame (999 ms remains healthy). Actual completion time,
+rather than delayed main observation, drives this clock, including unsigned
+rollover. The 29999/30000 ms result deadline starts only at valid capture end.
+Worker failures while listening and coincident with RECORDED/NO_SPEECH win once;
+early or late CANCELLED acknowledgment after quiet capture cannot become a
+second error. An already available final result still passes through THINKING.
 
-The eight test_audio cases run production RobotAudio against the M5 two-slot
-queue/callback and PSRAM allocation fixtures. They cover queued 20 ms frames,
-speech beyond two seconds, 3-second initial silence and delayed onset, exact
-120 ms cumulative activity, 4.98/5.00-second hangover/reset, quiet/brief noise,
-exact 160,000-sample cap (including a quiet wait cut short by the cap),
-sample-count playback/borrowing, buffer reuse and busy borrows, failed allocation/start/refill, retry, delayed final callback, and a
-slow main update discarding captured tail only after driver join. The fixture
-models completed PCM and driver ownership; it does not prove actual I2S/DMA
-continuity or thread scheduling. Energy checks cover 99 PCM units below the
-100-unit mean absolute threshold and 100 units at the threshold. This threshold
-is an initial device-tuning value, not a validated speech detector.
+The eight bounded test_audio cases retain record/replay regression coverage:
+queued 20 ms frames, the exact ten-second standalone sample cap, initial quiet,
+cumulative activity, the three-second silence hangover/reset, energy boundaries,
+sample-count playback/borrowing, reusable clip allocation, failed
+allocation/start/refill,
+retry, delayed driver callback, and joined capture-tail truncation. Their test
+access fixture reaches the private clip boundary without replacing production
+RobotTranscription with a competing class definition.
 
-The test_transcription suite exercises the same bounded HTTP parser used by
-the worker, without a socket or RTOS mock. It covers numeric IPv4 base URLs,
-fragmented multilingual UTF-8, empty/max-size results and embedded NUL lengths,
-HTTP rejection/redirects, incomplete bodies, malformed or ambiguous framing,
+The 12 test_stream cases use the real audio ring, upload helper and response
+parser. They verify 70 seconds of speech plus three seconds of exact silence
+tail with byte-for-byte little-endian PCM through ring wrap, a single 40,960-byte
+allocation, and no firmware/backend-length cap in capture. They cover driver
+release before classification, partial PCM keeping a slot immutable, and slot
+requeue immediately after its last PCM byte, even before a stalled HTTP suffix or
+any response. Slow classification excludes extra captured tail; a final chunk
+cannot precede microphone join. Initial quiet and brief noise cancel without a
+final chunk; delayed onset and cumulative 120 ms activity preserve the existing
+windows. Exhaustion, allocation/start/refill/stopped-driver failures, live
+fragmented HTTP 413, EOF, failed writes and premature HTTP 200 use abort paths.
+Logical cancellation stops the microphone and holds admission until the fixture
+acknowledges socket cleanup. Write progress resets the five-second stall clock;
+first-response and partial-response waits exercise 25- and five-second limits,
+including rollover. A status line begun before the terminal chunk remains
+premature when its CRLF/headers/body arrive afterward. Readable data cannot
+bypass the exact 25-second first-response or five-second response-idle expiry;
+24999/4999 ms controls still succeed, including unsigned rollover. Repeated
+starts reuse the ring.
+
+The seven test_transcription cases exercise the bounded parser: numeric IPv4
+URLs, fragmented multilingual UTF-8, empty/max-size results and embedded NUL,
+HTTP rejection/redirects, incomplete bodies, malformed/ambiguous framing,
 media/encoding rejection, fixed header/line/body limits, canary-protected output,
-and invalid/overlong/surrogate/out-of-range UTF-8. It does not establish socket
-cleanup, task allocation, clip ownership under real concurrency, Wi-Fi memory
-use or device timing. See the tap-to-transcribe plan for the device checklist
-and docs/plan/speech-silence-stop.md#cores3-validation-follow-up for the
-user-reported result.
+and invalid/overlong/surrogate/out-of-range UTF-8.
 
 Firmware compile check (also no upload):
 
     pio run -e m5stack-cores3
 
-Native tests establish sample/state decisions, modeled driver handoff and
-once-per-update action signals; actual capture/submission/Serial counts, length-based Serial output, concurrent
-clip release, microphone quality, physical touch, renderer notifications, blink
-recovery and networking require the silence-stop and transcription plans'
-CoreS3 checks. The backend suite checks its process/HTTP boundary separately; T1 also records a
-real local-model clip smoke. Neither command above flashes a device; a build
-does not prove behavior.
+Validate both missing configuration and a configured build: an unconfigured
+link can discard the worker and hide integration errors. Use a temporary dummy
+LocalConfig.h only when no existing local configuration is present; never
+replace or read credentials for this check. See the streaming plan for the
+recorded build commands, resolved dependencies and memory output.
+
+Native fixtures model driver completion and socket acceptance, not I2S/DMA
+continuity, FreeRTOS queue publication or scheduling, real connect/close calls,
+exceptional lwIP close delays, Wi-Fi memory use or physical timing. In particular,
+manual fixture cleanup acknowledgment proves the shared audio admission rule,
+not SDK close behavior. Configured compilation/linking checks the real adapter;
+physical runtime validation remains necessary. Serial output, microphone quality,
+first backend PCM versus capture end, queue high-water, minimum internal heap,
+PSRAM use, repeated Wi-Fi loss/recovery, long stalls, touch, blink and sleep/wake
+remain device checks in docs/plan/stream-audio-while-speaking.md. No device upload
+is part of these commands, and a build does not prove hardware behavior.

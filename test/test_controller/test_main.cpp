@@ -1,4 +1,5 @@
 #include <unity.h>
+#include <initializer_list>
 #include "RobotStateMachine.h"
 
 RobotStateMachine machine;
@@ -55,7 +56,7 @@ void assertCompletion(Completion expected)
 void assertNoActions()
 {
   TEST_ASSERT_FALSE(machine.actions().startRecording);
-  TEST_ASSERT_FALSE(machine.actions().submitTranscription);
+  TEST_ASSERT_FALSE(machine.actions().captureFinished);
   assertCompletion(Completion::NONE);
 }
 
@@ -65,7 +66,7 @@ uint32_t enterThinking(uint32_t now)
   TEST_ASSERT_TRUE(tick(true, now));
   TEST_ASSERT_TRUE(machine.actions().startRecording);
   TEST_ASSERT_TRUE(tick(false, now + 2000, audio(AudioStatus::RECORDED)));
-  TEST_ASSERT_TRUE(machine.actions().submitTranscription);
+  TEST_ASSERT_TRUE(machine.actions().captureFinished);
   assertState(RobotState::THINKING);
   return machine.requestId();
 }
@@ -104,7 +105,7 @@ void test_busy_presses_and_held_touches_do_not_queue_actions()
   TEST_ASSERT_FALSE(tick(false, 102, audio(AudioStatus::RECORDING)));
   assertNoActions();
   TEST_ASSERT_TRUE(tick(true, 2100, audio(AudioStatus::RECORDED)));
-  TEST_ASSERT_TRUE(machine.actions().submitTranscription);
+  TEST_ASSERT_TRUE(machine.actions().captureFinished);
   TEST_ASSERT_FALSE(tick(true, 2101, audio(AudioStatus::RECORDED)));
   assertNoActions();
   TEST_ASSERT_FALSE(tick(false, 2102));
@@ -128,7 +129,7 @@ void test_ten_cycles_capture_submit_and_complete_once()
     TEST_ASSERT_FALSE(tick(false, now + 1, audio(AudioStatus::COMPLETE)));
     assertNoActions();
     TEST_ASSERT_TRUE(tick(true, now + 2000, audio(AudioStatus::RECORDED)));
-    submissions += machine.actions().submitTranscription;
+    submissions += machine.actions().captureFinished;
     TEST_ASSERT_FALSE(tick(true, now + 2001, audio(AudioStatus::RECORDED)));
     assertNoActions();
     const auto status = cycle % 2 == 0 ? ResultStatus::TRANSCRIPT : ResultStatus::EMPTY;
@@ -176,28 +177,28 @@ void test_capture_watchdog_boundary_and_rollover_allow_finalized_clip()
   {
     machine.begin(start);
     TEST_ASSERT_TRUE(tick(true, start));
-    TEST_ASSERT_FALSE(tick(true, start + 10999, audio(AudioStatus::RECORDING)));
-    TEST_ASSERT_TRUE(tick(true, start + 11000, audio(AudioStatus::RECORDED)));
+    TEST_ASSERT_FALSE(tick(true, start + 999, audio(AudioStatus::RECORDING)));
+    TEST_ASSERT_TRUE(tick(true, start + 1000, audio(AudioStatus::RECORDED)));
     assertState(RobotState::THINKING);
-    TEST_ASSERT_TRUE(machine.actions().submitTranscription);
+    TEST_ASSERT_TRUE(machine.actions().captureFinished);
     TEST_ASSERT_FALSE(machine.didFail());
-    TEST_ASSERT_FALSE(tick(false, start + 11001, audio(AudioStatus::RECORDED)));
+    TEST_ASSERT_FALSE(tick(false, start + 1001, audio(AudioStatus::RECORDED)));
     assertNoActions();
 
     machine.begin(start);
     TEST_ASSERT_TRUE(tick(true, start));
-    TEST_ASSERT_TRUE(tick(false, start + 11000, audio(AudioStatus::RECORDING)));
+    TEST_ASSERT_TRUE(tick(false, start + 1000, audio(AudioStatus::RECORDING)));
     assertState(RobotState::IDLE);
     assertFailure(Failure::CAPTURE_TIMED_OUT);
     assertNoActions();
-    TEST_ASSERT_FALSE(tick(false, start + 11001, audio(AudioStatus::RECORDED)));
+    TEST_ASSERT_FALSE(tick(false, start + 1001, audio(AudioStatus::RECORDED)));
     TEST_ASSERT_FALSE(machine.didFail());
-    TEST_ASSERT_TRUE(tick(true, start + 11002));
+    TEST_ASSERT_TRUE(tick(true, start + 1002));
     TEST_ASSERT_TRUE(machine.actions().startRecording);
   }
 }
 
-void test_capture_no_speech_returns_idle_once_without_upload_and_allows_retry()
+void test_capture_no_speech_returns_idle_once_without_finalizing_stream_and_allows_retry()
 {
   const uint32_t starts[] = {100u, 0xFFFFF000u};
   for (uint32_t start : starts)
@@ -207,7 +208,7 @@ void test_capture_no_speech_returns_idle_once_without_upload_and_allows_retry()
     TEST_ASSERT_TRUE(tick(true, start + 3000, audio(AudioStatus::NO_SPEECH)));
     assertState(RobotState::IDLE);
     assertCompletion(Completion::NO_SPEECH);
-    TEST_ASSERT_FALSE(machine.actions().submitTranscription);
+    TEST_ASSERT_FALSE(machine.actions().captureFinished);
     TEST_ASSERT_FALSE(machine.actions().startRecording);
     TEST_ASSERT_FALSE(machine.didFail());
     TEST_ASSERT_FALSE(tick(false, start + 3001, audio(AudioStatus::NO_SPEECH)));
@@ -396,7 +397,7 @@ void test_all_completion_and_failure_paths_refresh_idle_clock()
       {
         machine.begin(start);
         TEST_ASSERT_TRUE(tick(true, start));
-        endedAt = start + (outcome == 3 ? 100 : 11000);
+        endedAt = start + (outcome == 3 ? 100 : 1000);
         TEST_ASSERT_TRUE(tick(true, endedAt,
             audio(outcome == 3 ? AudioStatus::FAILED : AudioStatus::RECORDING)));
       }
@@ -424,9 +425,107 @@ void test_begin_resets_actions_failures_ids_and_uses_current_uptime()
   assertState(RobotState::SLEEPING);
 }
 
+void test_backend_rejection_during_capture_stops_listening_once()
+{
+  machine.begin(100);
+  TEST_ASSERT_TRUE(tick(true, 100));
+  Inputs rejected = result(machine.requestId(), ResultStatus::FAILED);
+  rejected.audioStatus = AudioStatus::RECORDING;
+  rejected.requestPending = true; // Socket close can still own the session.
+  TEST_ASSERT_TRUE(tick(false, 200, rejected));
+  assertState(RobotState::IDLE);
+  assertFailure(Failure::TRANSCRIPTION_FAILED);
+  TEST_ASSERT_FALSE(tick(true, 201, rejected));
+  TEST_ASSERT_FALSE(machine.didFail());
+  assertNoActions();
+  TEST_ASSERT_FALSE(tick(true, 202, result(machine.requestId(), ResultStatus::FAILED)));
+  TEST_ASSERT_FALSE(tick(false, 203));
+  TEST_ASSERT_TRUE(tick(true, 204));
+  TEST_ASSERT_EQUAL_UINT32(2, machine.requestId());
+}
+
+void test_capture_progress_has_no_total_deadline_and_uses_actual_frame_time()
+{
+  for (uint32_t start : {100u, 0xFFFFF000u})
+  {
+    machine.begin(start);
+    TEST_ASSERT_TRUE(tick(true, start));
+    Inputs progress = audio(AudioStatus::RECORDING);
+    for (uint32_t frame = 1; frame <= 3500; ++frame)
+    {
+      progress.completedFrames = frame;
+      progress.lastCompletedFrameAt = start + frame * 20;
+      TEST_ASSERT_FALSE(tick(false, progress.lastCompletedFrameAt, progress));
+      assertState(RobotState::LISTENING);
+      TEST_ASSERT_FALSE(machine.didFail());
+    }
+    TEST_ASSERT_FALSE(tick(false, progress.lastCompletedFrameAt + 999, progress));
+    TEST_ASSERT_TRUE(tick(false, progress.lastCompletedFrameAt + 1000, progress));
+    assertFailure(Failure::CAPTURE_TIMED_OUT);
+
+    machine.begin(start);
+    TEST_ASSERT_TRUE(tick(true, start));
+    progress.completedFrames = 1;
+    progress.lastCompletedFrameAt = start + 20;
+    TEST_ASSERT_TRUE(tick(false, start + 1020, progress)); // Delayed observation is not fresh progress.
+    assertFailure(Failure::CAPTURE_TIMED_OUT);
+  }
+}
+
+void test_capture_finalization_and_worker_failure_or_cancel_ordering()
+{
+  for (AudioStatus status : {AudioStatus::RECORDED, AudioStatus::NO_SPEECH})
+  {
+    machine.begin(100);
+    TEST_ASSERT_TRUE(tick(true, 100));
+    Inputs failed = result(machine.requestId(), ResultStatus::FAILED);
+    failed.audioStatus = status;
+    TEST_ASSERT_TRUE(tick(false, 200, failed));
+    assertFailure(Failure::TRANSCRIPTION_FAILED);
+    assertCompletion(Completion::NONE);
+    assertState(RobotState::IDLE);
+    TEST_ASSERT_FALSE(tick(true, 201, failed));
+    TEST_ASSERT_FALSE(machine.didFail());
+  }
+  for (bool earlyAcknowledgment : {false, true})
+  {
+    machine.begin(100);
+    TEST_ASSERT_TRUE(tick(true, 100));
+    Inputs quiet = audio(AudioStatus::NO_SPEECH);
+    quiet.resultRequestId = machine.requestId();
+    quiet.requestPending = !earlyAcknowledgment;
+    if (earlyAcknowledgment) quiet.resultStatus = ResultStatus::CANCELLED;
+    TEST_ASSERT_TRUE(tick(true, 3100, quiet));
+    assertCompletion(Completion::NO_SPEECH);
+    TEST_ASSERT_FALSE(machine.didFail());
+    quiet.resultStatus = ResultStatus::CANCELLED;
+    quiet.requestPending = false;
+    TEST_ASSERT_FALSE(tick(true, 3101, quiet));
+    TEST_ASSERT_FALSE(machine.didFail());
+    assertNoActions();
+    TEST_ASSERT_FALSE(tick(false, 3102));
+    TEST_ASSERT_TRUE(tick(true, 3103));
+    TEST_ASSERT_TRUE(machine.actions().startRecording);
+  }
+  machine.begin(100);
+  TEST_ASSERT_TRUE(tick(true, 100));
+  Inputs fast = result(machine.requestId(), ResultStatus::TRANSCRIPT);
+  fast.audioStatus = AudioStatus::RECORDED;
+  TEST_ASSERT_TRUE(tick(false, 5200, fast));
+  assertState(RobotState::THINKING);
+  assertCompletion(Completion::NONE);
+  TEST_ASSERT_TRUE(tick(false, 5201, fast));
+  assertCompletion(Completion::TRANSCRIPT);
+  TEST_ASSERT_FALSE(tick(false, 5202, fast));
+  assertNoActions();
+}
+
 int main()
 {
   UNITY_BEGIN();
+  RUN_TEST(test_capture_finalization_and_worker_failure_or_cancel_ordering);
+  RUN_TEST(test_capture_progress_has_no_total_deadline_and_uses_actual_frame_time);
+  RUN_TEST(test_backend_rejection_during_capture_stops_listening_once);
   RUN_TEST(test_startup_is_idle_without_actions);
   RUN_TEST(test_unavailable_press_reports_once_without_capturing_and_can_retry);
   RUN_TEST(test_busy_presses_and_held_touches_do_not_queue_actions);
@@ -434,7 +533,7 @@ int main()
   RUN_TEST(test_transcription_wait_survives_capture_watchdog);
   RUN_TEST(test_playback_status_does_not_enter_speaking);
   RUN_TEST(test_capture_watchdog_boundary_and_rollover_allow_finalized_clip);
-  RUN_TEST(test_capture_no_speech_returns_idle_once_without_upload_and_allows_retry);
+  RUN_TEST(test_capture_no_speech_returns_idle_once_without_finalizing_stream_and_allows_retry);
   RUN_TEST(test_request_watchdog_has_its_own_boundary_and_rollover);
   RUN_TEST(test_capture_driver_failure_and_immediate_admission_failure_allow_retry);
   RUN_TEST(test_worker_failure_is_one_diagnostic_signal_and_refreshes_inactivity);

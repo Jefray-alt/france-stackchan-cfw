@@ -13,6 +13,7 @@ public:
     NONE,
     TRANSCRIPT,
     EMPTY,
+    CANCELLED,
     FAILED
   };
 
@@ -36,6 +37,8 @@ public:
   struct Inputs
   {
     RobotAudio::Status audioStatus = RobotAudio::Status::IDLE;
+    uint32_t completedFrames = 0;
+    uint32_t lastCompletedFrameAt = 0;
     bool transcriptionReady = true;
     bool requestPending = false;
     ResultStatus resultStatus = ResultStatus::NONE;
@@ -45,7 +48,7 @@ public:
   struct Actions
   {
     bool startRecording = false;
-    bool submitTranscription = false;
+    bool captureFinished = false;
     Completion completion = Completion::NONE;
   };
 
@@ -61,6 +64,8 @@ private:
   RobotState state = RobotState::IDLE;
   uint32_t lastStateChange = 0;
   uint32_t activeRequestId = 0;
+  uint32_t lastCaptureProgressAt = 0;
+  uint32_t lastCompletedFrames = 0;
   Actions requestedActions;
   Failure currentFailure = Failure::NONE;
 

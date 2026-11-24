@@ -33,44 +33,66 @@ void RobotController::update()
   const uint32_t now = millis();
   audio.update(now);
 
-  // Always poll, including after logical timeout: only this acknowledgment can
-  // release the worker's clip. The state machine discards obsolete result IDs.
-  const bool hasResult = transcription.poll(transcriptionResult);
+  // Cache an acknowledgment if it races the final capture update. A valid
+  // capture must visibly enter THINKING before consuming even a fast result.
+  if (transcription.poll(transcriptionResult))
+  {
+    hasTranscriptionResult = true;
+  }
   const auto readiness = transcription.readiness();
+  const auto activeError = transcription.activeError();
   RobotStateMachine::Inputs inputs;
   inputs.audioStatus = audio.status();
+  inputs.completedFrames = audio.completedFrameCount();
+  inputs.lastCompletedFrameAt = audio.lastCompletedFrameAt();
   inputs.transcriptionReady = readiness == RobotTranscription::Readiness::READY;
   inputs.requestPending = transcription.hasPendingRequest();
-  if (hasResult)
+  RobotTranscription::Error error = unavailableError(readiness);
+  uint16_t httpStatus = 0;
+  if (hasTranscriptionResult)
   {
+    error = transcriptionResult.error;
+    httpStatus = transcriptionResult.httpStatus;
     inputs.resultRequestId = transcriptionResult.requestId;
-    inputs.resultStatus = transcriptionResult.error != RobotTranscription::Error::NONE
+    inputs.resultStatus = error == RobotTranscription::Error::CANCELLED
+        ? RobotStateMachine::ResultStatus::CANCELLED
+        : error != RobotTranscription::Error::NONE
         ? RobotStateMachine::ResultStatus::FAILED
         : (transcriptionResult.textLength == 0 ? RobotStateMachine::ResultStatus::EMPTY
             : RobotStateMachine::ResultStatus::TRANSCRIPT);
   }
-
-  const bool changed = stateMachine.update(wasPressed, now, inputs);
-  applyDecision(changed, hasResult ? transcriptionResult.error : unavailableError(readiness),
-      hasResult ? transcriptionResult.httpStatus : 0);
-
-  if (stateMachine.actions().startRecording && !audio.startRecording())
+  else if (activeError != RobotTranscription::Error::NONE)
   {
-    inputs = RobotStateMachine::Inputs{};
-    inputs.audioStatus = RobotAudio::Status::FAILED;
-    applyDecision(stateMachine.update(false, millis(), inputs));
+    error = activeError;
+    inputs.resultRequestId = stateMachine.requestId();
+    inputs.resultStatus = RobotStateMachine::ResultStatus::FAILED;
   }
-  else if (stateMachine.actions().submitTranscription)
+
+  const bool changed = stateMachine.update(wasPressed, millis(), inputs);
+  applyDecision(changed, error, httpStatus);
+  if (stateMachine.getState() == RobotState::IDLE)
   {
-    const auto error = transcription.submit(audio, stateMachine.requestId());
-    if (error != RobotTranscription::Error::NONE)
+    hasTranscriptionResult = false;
+  }
+
+  if (stateMachine.actions().startRecording)
+  {
+    if (!audio.startStreaming())
     {
-      // Admission can fail after capture (for example, Wi-Fi loss). Report it
-      // through the same exactly-once result/failure decision as worker errors.
       inputs = RobotStateMachine::Inputs{};
-      inputs.resultRequestId = stateMachine.requestId();
-      inputs.resultStatus = RobotStateMachine::ResultStatus::FAILED;
-      applyDecision(stateMachine.update(false, millis(), inputs), error);
+      inputs.audioStatus = RobotAudio::Status::FAILED;
+      applyDecision(stateMachine.update(false, millis(), inputs));
+    }
+    else
+    {
+      const auto admission = transcription.startStream(audio, stateMachine.requestId());
+      if (admission != RobotTranscription::Error::NONE)
+      {
+        inputs = RobotStateMachine::Inputs{};
+        inputs.resultRequestId = stateMachine.requestId();
+        inputs.resultStatus = RobotStateMachine::ResultStatus::FAILED;
+        applyDecision(stateMachine.update(false, millis(), inputs), admission);
+      }
     }
   }
 
@@ -115,6 +137,14 @@ void RobotController::applyDecision(bool stateChanged,
   else if (stateMachine.actions().completion == RobotStateMachine::Completion::NO_SPEECH)
   {
     Serial.println("No speech detected");
+  }
+
+  if (stateMachine.didFail()
+      || stateMachine.actions().completion != RobotStateMachine::Completion::NONE)
+  {
+    // Join the microphone immediately; the ring borrow remains until poll()
+    // acknowledges the socket close, even after a logical result timeout.
+    audio.stop();
   }
 
   if (stateChanged)

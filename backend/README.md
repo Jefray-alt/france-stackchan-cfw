@@ -1,8 +1,8 @@
 # Local transcription test backend
 
-A disposable Node.js 24 service for the CoreS3's variable-length recordings. It runs
-local `whisper-cli` once per accepted request. There are no npm packages, API
-keys, remote inference requests, or saved recordings. Setup downloads source
+A disposable Node.js 24 service for the CoreS3's streamed and fixed-length
+recordings. It runs local `whisper-cli` once per accepted request. There are no
+npm packages, API keys, remote inference requests, or saved recordings. Setup downloads source
 and model weights; inference works without internet afterward.
 
 ## One-time local setup
@@ -67,15 +67,17 @@ of John F. Kennedy's 1961 inaugural address. The sample ships in the
 [MIT-licensed source](https://github.com/ggml-org/whisper.cpp/blob/d1be6fde11ac6e0407606b4e42fe72d34add8037/LICENSE);
 the federal address recording is identified as public domain in its
 [source and reuse record](https://commons.wikimedia.org/wiki/File:JFK_inaugural_address.ogg).
-The command below extracts the first ten seconds (the capture cap) in memory,
-validates the sample format and
-sends the raw PCM to a running backend. It needs no audio conversion package or
+The command below extracts the first ten seconds in memory, validates the sample
+format and sends 20 ms PCM frames to a running backend at capture pace. It uses
+HTTP/1.1 chunked framing and needs no audio conversion package or
 network download. Set `WHISPER_ROOT` as in setup in this terminal first.
 
 ```sh
 node --input-type=module - "$WHISPER_ROOT/whisper.cpp/samples/jfk.wav" <<'JS'
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
+import { request } from 'node:http';
+import { setTimeout as delay } from 'node:timers/promises';
 const wav = readFileSync(process.argv[2]);
 assert.equal(wav.toString('ascii', 0, 4), 'RIFF');
 assert.equal(wav.toString('ascii', 8, 12), 'WAVE');
@@ -98,23 +100,47 @@ for (let offset = 12; offset + 8 <= wav.length;)
 }
 assert.ok(formatOK && pcm?.length === 320000);
 const started = performance.now();
-const response = await fetch('http://127.0.0.1:3000/v1/transcriptions', {
+const req = request('http://127.0.0.1:3000/v1/transcriptions', {
   method: 'POST', headers: { 'Content-Type': 'application/octet-stream',
-    'Content-Length': String(pcm.length) }, body: pcm, signal: AbortSignal.timeout(30000)
+    'Transfer-Encoding': 'chunked' }, signal: AbortSignal.timeout(40000)
 });
-const text = await response.text();
-console.log({ status: response.status, text, elapsedMs: Math.round(performance.now() - started) });
-assert.equal(response.status, 200);
+const result = new Promise((resolve, reject) => {
+  req.on('error', reject);
+  req.on('response', async (response) => {
+    try
+    {
+      const chunks = [];
+      for await (const chunk of response) chunks.push(chunk);
+      resolve({ status: response.statusCode, text: Buffer.concat(chunks).toString('utf8') });
+    }
+    catch (error) { reject(error); }
+  });
+});
+// Handle transport rejection while frames are still sending.
+void result.catch(() => {});
+for (let offset = 0; offset < pcm.length; offset += 640)
+{
+  req.write(pcm.subarray(offset, offset + 640));
+  await delay(20);
+}
+req.end(); // Sends the final zero-length chunk; only then may inference start.
+const { status, text } = await result;
+console.log({ status, text, elapsedMs: Math.round(performance.now() - started) });
+assert.equal(status, 200);
 assert.match(text, /my fellow Americans.*ask not what your country can do for you.*ask what you can do for your country/i);
 JS
 ```
 
 Each request includes model loading. Measure on your own computer against the
-five-second body, 20-second inference, and 30-second firmware request deadlines.
-The ten-second fixture returned HTTP 200 in 370 ms on the development computer,
-including “ask not what your country can do for you, ask what you can do for
-your country.” The earlier two-second crop cut into “Americans”; the longer
-fixture checks words beyond that old cutoff. This checks local inference and
+body deadlines below, the 20-second inference deadline, and the firmware's
+30-second result deadline after capture ends. The paced ten-second fixture
+returned HTTP 200 in about 11 seconds on the development computer, including
+“ask not what your country can do for you, ask what you can do for your country.”
+A separate 60-second fixture made by repeating this PCM completed inference
+within 20 seconds; exact timings are in the
+[streaming plan](../docs/plan/stream-audio-while-speaking.md#t1-accept-incremental-pcm-uploads-in-the-backend).
+The earlier two-second crop cut into “Americans”; the longer fixture checks words
+beyond that old cutoff. This checks local inference and
 HTTP handling, with no CoreS3 microphone, Wi-Fi, energy detection, or broad
 accuracy claim. Whisper can hallucinate text for silence/noise; the backend has
 no speech detector. An empty successful transcript is valid. See the
@@ -130,25 +156,37 @@ LAN IPv4 address as the firmware backend base URL, for example
 the computer. This testing service uses plain HTTP on a trusted LAN and has no
 public hosting or authentication scope. Audio stays on the device/computer path.
 
-Update this backend before installing the silence-stop firmware. Legacy
-64,000-byte requests remain valid. A replacement service only needs the following contract and an updated device
-base URL; Whisper flags and local paths never reach the device:
+Update this backend before installing the streaming firmware. Legacy
+64,000-byte and variable-length fixed-length requests remain valid. A replacement
+service only needs the following contract and an updated device base URL;
+Whisper flags and local paths never reach the device:
 
 | Request/response | Contract |
 | --- | --- |
 | Endpoint | `POST /v1/transcriptions` |
 | Request media | `Content-Type: application/octet-stream` |
-| Request body | An even 3,840–320,000 bytes inclusive; signed 16-bit little-endian mono PCM, 16 kHz |
-| Request framing | Matching `Content-Length`; no transfer/content encoding or multipart |
+| PCM format | Signed 16-bit little-endian mono PCM, 16 kHz; even body of at least 3,840 bytes |
+| Fixed-length body | Matching `Content-Length`, at most 320,000 bytes; five-second total body deadline |
+| Streaming body | HTTP/1.1 `Transfer-Encoding: chunked`, no `Content-Length`, at most 1,920,000 decoded PCM bytes (60 seconds); five-second body idle and 65-second total body deadlines |
+| Other framing | No content encoding or multipart; reject missing, ambiguous or malformed framing and other transfer codings |
 | Success | 200, `Content-Type: text/plain; charset=utf-8`, explicit byte `Content-Length` |
 | Success body | Trimmed UTF-8 transcript, at most 2,048 bytes; empty is valid |
-| Invalid length/framing/body | 400 (including odd/undersized lengths, incomplete bodies and a five-second body receipt deadline) |
-| Oversized input | 413 |
+| Invalid length/framing/body | 400 (including odd/undersized lengths, incomplete bodies and body deadline expiry); a disconnected client may receive no response |
+| Oversized input | 413 as soon as the limit is exceeded, including while a chunked request remains open |
 | Unsupported media | 415 |
 | Busy/shutting down | 503; one admitted request, no queue or retry |
 | Inference/UTF-8/output failure | 502; short message without process diagnostics |
 | Inference deadline | 504; 20 seconds shared by startup, stdin, inference and stdout |
 | Unknown path/method | 404/405 |
+
+The backend receives decoded PCM as data arrives into one bounded buffer (up to
+1,920,000 bytes for streaming). It runs inference only after a normally completed,
+validated body, exactly once per accepted request. The streaming client must
+finish with the zero-length HTTP chunk. Close the connection without that final
+chunk to cancel a quiet/noise recording or capture failure; partial, malformed,
+disconnected and timed-out bodies are discarded without inference. Fixed-length
+and streaming requests share the same admission slot, held through inference
+cleanup. The upload limit is backend policy, independent of firmware capture.
 
 The backend adds the 44-byte WAV header in memory and launches `whisper-cli`
 asynchronously without a shell, using `--model`, `--language`, `--file -`,

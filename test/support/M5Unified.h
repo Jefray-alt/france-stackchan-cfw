@@ -6,6 +6,9 @@
 #include <deque>
 #include <functional>
 
+inline uint32_t& fakeMillis() { static uint32_t now = 0; return now; }
+inline uint32_t millis() { return fakeMillis(); }
+
 // Native-only driver boundary: model the two request slots and delayed release.
 struct FakeMic
 {

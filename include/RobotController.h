@@ -15,6 +15,7 @@ private:
   RobotAudio audio;
   RobotTranscription transcription;
   RobotTranscription::Result transcriptionResult;
+  bool hasTranscriptionResult = false;
   FaceRenderer face;
 
   void applyDecision(bool stateChanged,
