@@ -81,8 +81,10 @@ in `include/RobotState.h`.
 Update the [local backend](backend/README.md) before using this firmware; the
 new service still accepts the earlier 64,000-byte recordings. Configure Wi-Fi
 as below. Tap while idle, then speak during the 16 kHz mono capture. Start
-within three seconds. A pause shorter than 800 ms keeps the clip open; 800 ms
-of silence ends it. Continuous sound stops at exactly ten seconds. Leading
+within three seconds. A pause shorter than five seconds keeps the clip open
+when the ten-second capture cap leaves enough time; five consecutive seconds
+of silence ends it.
+The ten-second cap can end capture before the full pause elapses. Leading
 and trailing audio through the stop frame are retained.
 
 The listening face changes to thinking while one request is processed. Success
@@ -93,7 +95,7 @@ return idle without uploading. There is no automatic replay; the retained
 playback API uses the same finalized clip length.
 
 Detection uses mean absolute energy on 20 ms frames, initially a threshold of
-500 PCM units. The threshold and sample-based windows are tunable in
+100 PCM units. The threshold and sample-based windows are tunable in
 `include/RobotAudio.h` and need CoreS3 checks with ordinary/quiet speech and room
 noise. This energy gate cannot reliably distinguish speech from steady noise;
 Whisper can also produce text from noise. AI response and generated audio

@@ -38,13 +38,14 @@ See docs/plan/tap-to-transcribe.md for the accepted interaction and device check
 The eight test_audio cases run production RobotAudio against the M5 two-slot
 queue/callback and PSRAM allocation fixtures. They cover queued 20 ms frames,
 speech beyond two seconds, 3-second initial silence and delayed onset, exact
-120 ms cumulative activity, 780/800 ms hangover/reset, quiet/brief noise,
-exact 160,000-sample cap, sample-count playback/borrowing, buffer reuse and busy
-borrows, failed allocation/start/refill, retry, delayed final callback, and a
+120 ms cumulative activity, 4.98/5.00-second hangover/reset, quiet/brief noise,
+exact 160,000-sample cap (including a quiet wait cut short by the cap),
+sample-count playback/borrowing, buffer reuse and busy borrows, failed allocation/start/refill, retry, delayed final callback, and a
 slow main update discarding captured tail only after driver join. The fixture
 models completed PCM and driver ownership; it does not prove actual I2S/DMA
-continuity or thread scheduling. The mean absolute energy threshold of 500 PCM
-units is an initial device-tuning value, not a validated speech detector.
+continuity or thread scheduling. Energy checks cover 99 PCM units below the
+100-unit mean absolute threshold and 100 units at the threshold. This threshold
+is an initial device-tuning value, not a validated speech detector.
 
 The test_transcription suite exercises the same bounded HTTP parser used by
 the worker, without a socket or RTOS mock. It covers numeric IPv4 base URLs,

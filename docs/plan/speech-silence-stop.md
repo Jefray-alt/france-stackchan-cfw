@@ -1,7 +1,12 @@
 # Record speech beyond two seconds
 
-**Status:** Implementation complete; frozen candidate awaiting independent review.
+**Status:** Five-second pause test/docs follow-up passed independent review.
 CoreS3 validation remains pending.
+
+The original implementation record below describes commit `ddb6132`, including
+its historical 800 ms pause and 500-unit threshold evidence. Current production
+settings are a five-second pause and 100-unit threshold; see the approved
+[follow-up](#approved-five-second-pause-follow-up) for current scope and checks.
 
 **Outcome:** A tap starts speech capture. The robot records and transcribes
 speech that continues beyond the current two-second cutoff. A sustained pause
@@ -225,3 +230,61 @@ loop sources are unchanged. Dependencies introduce no new library.
   of 500 PCM units and the approved timing settings, all of which need CoreS3
   observations. Update the backend before using the firmware.
 - No device upload or push was performed.
+
+
+## Approved five-second pause follow-up
+
+- Task: T1 tests/docs follow-up. Baseline: `feat/speech-silence-stop` at
+  `d090d59ca36a64a98ddca5306741be197b7ace52` in the isolated
+  `/tmp/stackchan-pause-tests.Mk163C` worktree; starting tracked/untracked state
+  was clean. The original checkout is outside this task.
+- Approval: On 2026-11-24, after the inline scope to align tests/docs and run
+  native tests plus the CoreS3 build, the user said “well we changed it 5 seconds
+  so update those tests or document”. Production settings already contain the
+  five-second pause (80,000 samples) and 100-unit activity threshold.
+- Scope/ownership: Only `test/test_audio/test_main.cpp`, `test/README`,
+  `README.md`, and this plan. No production, backend, dependency, secret
+  configuration, or device upload changes. Proposed atomic commit:
+  `test(audio): align coverage with five-second pauses`.
+- Dependencies/prior context: Retain the committed 3-second onset window,
+  120 ms cumulative activity minimum, 10-second cap, queue/clip ownership,
+  tail trim, and retry behavior from the original task. Existing production
+  settings are the source of the updated expected behavior.
+- Acceptance: Assert recording at 249 quiet frames (4.98 seconds) and finalize
+  at 250 (5.00 seconds); 99-unit frames remain below threshold and 100-unit
+  frames count as activity. Preserve late-onset, insufficient-activity,
+  tail-trim/driver-join, borrow, reuse and retry coverage with exact lengths.
+  Pause reset completes at 496 frames (9.92 seconds), below the cap. The
+  existing cap/ownership case also checks late-onset speech reaching the cap
+  after only 249 quiet frames. Docs explain that the cap can shorten the wait.
+- Expected checks: Focused audio RED, full native GREEN, CoreS3 compile,
+  documentation paths/consistency, and `git diff --check`. Backend behavior is
+  unchanged, so the backend suite does not need to be repeated.
+- RED before edits: `~/.platformio/penv/bin/pio test -e native -f test_audio`
+  exited 1. Five old cases failed: capture and pause-reset expected RECORDED
+  too soon; quiet-noise expected NO_SPEECH at the old energy boundary;
+  slow-update tail expected driver join too soon; retry expected RECORDED too
+  soon. Three cases passed. The runner reported SIGTRAP after Unity failures.
+- GREEN: `~/.platformio/penv/bin/pio test -e native` exited 0; all 34 cases
+  passed (19 controller, 8 audio, 7 protocol). No production changes were needed.
+- Firmware compile: `~/.platformio/penv/bin/pio run -e m5stack-cores3` exited
+  0 without local secret configuration. RAM: 34,724/327,680 bytes (10.6%);
+  flash: 609,211/6,553,600 bytes (9.3%). Two existing M5GFX unused-variable
+  warnings were emitted. No upload ran.
+- Documentation: local Markdown paths and the new follow-up anchor checked;
+  current pause/threshold descriptions agree with committed production settings.
+  `git diff --check` exited 0; no untracked candidate files are present.
+- Review round 1 of 3: `PASS`, with no actionable findings. Independent
+  `code_reviewer` on `gpt-6.1-sol`/`xhigh` verified the frozen patch and four
+  file hashes, reran all 34 native cases and the CoreS3 build, and checked all
+  20 local Markdown links/anchors plus whitespace. Only the approved four
+  files changed; original checkout stayed clean. Developer used
+  `gpt-6.1-sol`/`medium` for the scoped fixture/docs adjustment.
+- Handoff: T1 is complete for the atomic commit
+  `test(audio): align coverage with five-second pauses`. The main session
+  owns the branch push and PR update.
+- Hardware: No upload or hardware checks performed. Pending CoreS3 validation:
+  five-second pauses where the cap permits, cap-shortened waits, ordinary/quiet
+  speech and room noise at threshold 100, repeated capture/upload, and actual
+  microphone continuity/ownership. Passing fixtures and compilation do not
+  establish these device behaviors.

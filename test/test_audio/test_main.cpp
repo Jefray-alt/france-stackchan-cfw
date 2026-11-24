@@ -44,16 +44,16 @@ void test_capture_queues_continuously_and_keeps_speech_after_two_seconds()
   TEST_ASSERT_EQUAL_UINT(2, M5.Mic.queued.size());
   frames(audio, 150, 1000); // Three seconds of speech, all retained.
   assertStatus(audio, RobotAudio::Status::RECORDING);
-  frames(audio, 39, 0);
+  frames(audio, 249, 0);
   assertStatus(audio, RobotAudio::Status::RECORDING);
   frames(audio, 1, 0);
   assertStatus(audio, RobotAudio::Status::RECORDED);
   TEST_ASSERT_FALSE(M5.Mic.running);
   RobotAudio::Clip clip;
   TEST_ASSERT_TRUE(RobotTranscription::borrow(audio, clip));
-  TEST_ASSERT_EQUAL_UINT(60800, clip.sampleCount);
+  TEST_ASSERT_EQUAL_UINT(128000, clip.sampleCount);
   TEST_ASSERT_EQUAL_INT16(1000, clip.samples[47999]);
-  TEST_ASSERT_EQUAL_INT16(0, clip.samples[60800 - 1]);
+  TEST_ASSERT_EQUAL_INT16(0, clip.samples[128000 - 1]);
   RobotTranscription::release(audio);
 }
 
@@ -62,14 +62,14 @@ void test_short_pause_resets_hangover_and_minimum_activity_is_cumulative()
   RobotAudio audio;
   TEST_ASSERT_TRUE(audio.startRecording());
   frames(audio, 3, 1000);
-  frames(audio, 39, 0);
+  frames(audio, 240, 0); // 4.8 seconds; the next activity resets the pause.
   frames(audio, 3, -1000); // Six active frames = 120 ms.
-  frames(audio, 39, 0);
+  frames(audio, 249, 0);
   assertStatus(audio, RobotAudio::Status::RECORDING);
   frames(audio, 1, 0);
   assertStatus(audio, RobotAudio::Status::RECORDED);
   TEST_ASSERT_TRUE(audio.startPlayback());
-  TEST_ASSERT_EQUAL_UINT(85 * 320, M5.Speaker.playedSamples);
+  TEST_ASSERT_EQUAL_UINT(496 * 320, M5.Speaker.playedSamples);
 }
 
 void test_continuous_activity_hits_exact_cap_and_borrow_blocks_reuse()
@@ -96,6 +96,18 @@ void test_continuous_activity_hits_exact_cap_and_borrow_blocks_reuse()
   TEST_ASSERT_EQUAL_UINT(1, fakeHeap().allocations);
   TEST_ASSERT_EQUAL_UINT(320000, fakeHeap().bytes);
   TEST_ASSERT_EQUAL_UINT(MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT, fakeHeap().capabilities);
+
+  frames(audio, 149, 0); // Late onset leaves less than five quiet seconds at the cap.
+  frames(audio, 102, 100);
+  frames(audio, 248, 0); // 9.98 seconds total, only 4.96 seconds quiet.
+  assertStatus(audio, RobotAudio::Status::RECORDING);
+  frames(audio, 1, 0); // The ten-second cap wins after 4.98 seconds quiet.
+  assertStatus(audio, RobotAudio::Status::RECORDED);
+  TEST_ASSERT_TRUE(RobotTranscription::borrow(audio, clip));
+  TEST_ASSERT_EQUAL_UINT(160000, clip.sampleCount);
+  TEST_ASSERT_EQUAL_INT16(100, clip.samples[149 * 320]);
+  TEST_ASSERT_EQUAL_INT16(0, clip.samples[159999]);
+  RobotTranscription::release(audio);
 }
 
 void test_refill_failure_is_capture_error_and_retry_works()
@@ -119,9 +131,9 @@ void test_initial_silence_boundary_late_onset_and_quiet_noise()
 {
   RobotAudio audio;
   TEST_ASSERT_TRUE(audio.startRecording());
-  frames(audio, 149, 499); // Below the initial energy threshold.
+  frames(audio, 149, 99); // Below the initial energy threshold.
   assertStatus(audio, RobotAudio::Status::RECORDING);
-  frames(audio, 1, 499);
+  frames(audio, 1, 99);
   assertStatus(audio, RobotAudio::Status::NO_SPEECH);
   RobotAudio::Clip clip;
   TEST_ASSERT_FALSE(RobotTranscription::borrow(audio, clip));
@@ -129,18 +141,18 @@ void test_initial_silence_boundary_late_onset_and_quiet_noise()
 
   TEST_ASSERT_TRUE(audio.startRecording());
   frames(audio, 149, 0);
-  frames(audio, 6, 500); // Onset on the last allowed frame, exactly 120 ms.
-  frames(audio, 40, 0);
+  frames(audio, 6, 100); // Onset on the last allowed frame, exactly 120 ms.
+  frames(audio, 250, 0);
   assertStatus(audio, RobotAudio::Status::RECORDED);
   TEST_ASSERT_TRUE(RobotTranscription::borrow(audio, clip));
-  TEST_ASSERT_EQUAL_UINT(195 * 320, clip.sampleCount);
+  TEST_ASSERT_EQUAL_UINT(405 * 320, clip.sampleCount);
   TEST_ASSERT_EQUAL_INT16(0, clip.samples[0]);
-  TEST_ASSERT_EQUAL_INT16(500, clip.samples[149 * 320]);
+  TEST_ASSERT_EQUAL_INT16(100, clip.samples[149 * 320]);
   RobotTranscription::release(audio);
 
   TEST_ASSERT_TRUE(audio.startRecording());
   frames(audio, 5, -32768); // A 100 ms burst is insufficient activity.
-  frames(audio, 39, 0);
+  frames(audio, 249, 0);
   assertStatus(audio, RobotAudio::Status::RECORDING);
   frames(audio, 1, 0);
   assertStatus(audio, RobotAudio::Status::NO_SPEECH);
@@ -153,7 +165,7 @@ void test_slow_updates_discard_tail_and_join_before_clip_is_visible()
   RobotAudio audio;
   TEST_ASSERT_TRUE(audio.startRecording());
   for (unsigned frame = 0; frame < 6; ++frame) M5.Mic.release(1000);
-  for (unsigned frame = 0; frame < 40; ++frame) M5.Mic.release(0);
+  for (unsigned frame = 0; frame < 250; ++frame) M5.Mic.release(0);
   for (unsigned frame = 0; frame < 4; ++frame) M5.Mic.release(2000);
   bool joined = false;
   M5.Mic.onEnd = [&]() {
@@ -167,7 +179,7 @@ void test_slow_updates_discard_tail_and_join_before_clip_is_visible()
   assertStatus(audio, RobotAudio::Status::RECORDED);
   RobotAudio::Clip clip;
   TEST_ASSERT_TRUE(RobotTranscription::borrow(audio, clip));
-  TEST_ASSERT_EQUAL_UINT(46 * 320, clip.sampleCount);
+  TEST_ASSERT_EQUAL_UINT(256 * 320, clip.sampleCount);
   TEST_ASSERT_EQUAL_INT16(0, clip.samples[clip.sampleCount - 1]);
   RobotTranscription::release(audio);
 }
@@ -221,7 +233,7 @@ void test_allocation_and_driver_failures_release_ownership_for_retry()
   TEST_ASSERT_NULL(M5.Mic.callback);
   TEST_ASSERT_TRUE(audio.startRecording());
   frames(audio, 6, 1000);
-  frames(audio, 40, 0);
+  frames(audio, 250, 0);
   assertStatus(audio, RobotAudio::Status::RECORDED);
   TEST_ASSERT_EQUAL_UINT(2, fakeHeap().allocations); // Failed allocation + one reusable buffer.
 }
