@@ -3,9 +3,10 @@
 Custom firmware for an M5Stack CoreS3, built with PlatformIO, the Arduino
 framework, and M5Unified. The current source implements a touch-driven face
 with idle, listening, thinking, and sleeping interaction states. An idle tap
-records until a sustained pause (at most ten seconds) and sends the clip to a
-disposable local Whisper backend. The returned transcript appears once in Serial.
-The user confirmed tap-to-transcribe works on CoreS3 on 2026-11-24. See the
+streams microphone frames to a disposable local Whisper backend until a
+sustained pause, with no firmware recording-duration cap. The returned transcript appears once in Serial.
+The earlier bounded tap-to-transcribe path was confirmed on CoreS3 on 2026-11-24;
+the new streaming path still needs device validation. See the
 [device confirmation](docs/plan/speech-silence-stop.md#cores3-validation-follow-up).
 Earlier local audio record/replay was user-validated on 2026-11-24.
 
@@ -15,8 +16,9 @@ Earlier local audio record/replay was user-validated on 2026-11-24.
 - `src/main.cpp`: hardware initialization and the main update loop.
 - `src/RobotController.cpp`: touch input, rendering, and state-change logging.
 - `src/RobotStateMachine.cpp`: hardware-independent state and inactivity decisions.
-- `src/RobotAudio.cpp`: reusable PSRAM PCM buffer and exclusive microphone/speaker lifecycle.
-- `src/RobotTranscription.cpp`: bounded Wi-Fi/socket worker and clip/result handoff.
+- `src/RobotAudio.cpp`: reusable PSRAM capture ring, bounded record/replay clip, and audio lifecycle.
+- `src/RobotTranscription.cpp`: persistent Wi-Fi/socket worker and stream/result handoff.
+- `src/TranscriptionUpload.cpp`: incremental chunked upload and concurrent response handling.
 - `src/TranscriptionProtocol.cpp`: fixed-size HTTP framing and UTF-8 validation.
 - `src/FaceRenderer.cpp`: face drawing and blink timing.
 - `include/`: project headers and the shared `RobotState` enum.
@@ -79,21 +81,26 @@ in `include/RobotState.h`.
 
 ### Tap to transcribe
 
-Update the [local backend](backend/README.md) before using this firmware; the
-new service still accepts the earlier 64,000-byte recordings. Configure Wi-Fi
-as below. Tap while idle, then speak during the 16 kHz mono capture. Start
-within three seconds. A pause shorter than five seconds keeps the clip open
-when the ten-second capture cap leaves enough time; five consecutive seconds
-of silence ends it.
-The ten-second cap can end capture before the full pause elapses. Leading
-and trailing audio through the stop frame are retained.
+Update the [local backend](backend/README.md) before using this streaming firmware.
+It supports HTTP/1.1 chunked PCM while preserving fixed-length compatibility.
+Configure Wi-Fi as below. Tap while idle, then speak during the 16 kHz mono
+capture. Start within three seconds. Five consecutive seconds of silence after
+activity ends capture; shorter pauses keep it open. Leading and trailing audio
+through the exact silence-stop frame are sent in order while capture runs.
+There is no firmware duration or upload-length cap. The placeholder backend
+currently accepts at most 1,920,000 PCM bytes (60 seconds including silence),
+with five-second body-idle and 65-second total body deadlines. A live backend
+rejection stops capture and reports an error; audio is never retried automatically.
 
-The listening face changes to thinking while one request is processed. Success
+The face stays listening during capture and changes to thinking after a valid
+capture ends. The service runs Whisper only after the final HTTP chunk. Success
 prints `Transcript: <text>` once, preserving UTF-8 bytes, then returns idle.
 A quiet tap, less than 120 ms of detected activity, or an empty transcript
-prints `No speech detected` once. Quiet/noise captures below that minimum
-return idle without uploading. There is no automatic replay; the retained
-playback API uses the same finalized clip length.
+prints `No speech detected` once. Quiet or brief-noise capture closes the
+partially uploaded request without its final chunk, so the backend discards it
+without inference. Capture failures and timeouts use the same cancellation path.
+There is no automatic replay. The separate `startRecording()`/`startPlayback()`
+API remains available with its reusable ten-second clip and finalized sample count.
 
 Detection uses mean absolute energy on 20 ms frames with a threshold of
 100 PCM units. The threshold and sample-based windows are tunable in
@@ -105,8 +112,11 @@ Busy presses and held touches do not queue recordings. After 30 seconds idle,
 the face sleeps; a sleeping press wakes to idle, and the next distinct press
 records. Completion and failure refresh inactivity. A disconnected or
 unconfigured idle press prints a diagnostic without capturing audio for later.
-Capture has an 11-second watchdog from the start of listening. Transcription
-has a separate 30-second watchdog. Failures print one diagnostic and return idle. After a request timeout,
+Capture fails after one second without a completed microphone frame, measured
+from capture start or the last driver completion. A healthy stream can continue
+past eleven seconds. A separate 30-second result deadline starts after valid
+capture ends. Failures print one diagnostic and return idle. After cancellation
+or a request timeout,
 new recordings remain blocked until the worker acknowledges socket cleanup;
 late transcripts are discarded. Retry with a fresh press after cleanup and
 connectivity recovery. M5Unified driver cleanup and SDK socket close may wait
@@ -137,28 +147,40 @@ is tracked. Missing configuration still compiles; an idle transcription press
 reports it as unconfigured, and face/sleep/wake remain usable.
 
 One persistent worker schedules Wi-Fi attempts every ten seconds without
-waiting for association in the main loop. A disconnected submission fails
-immediately. There is one request and one result slot; the worker borrows the
-reusable 320,000-byte PSRAM PCM buffer instead of copying it, passing only
-the actual finalized sample count. Allocation failure returns idle without
-uploading. The main task keeps polling results even after an interaction times out: only an
-acknowledgment after socket close releases the clip for a new recording.
-Request IDs reject stale results, and explicit UTF-8 byte lengths preserve
-embedded NUL in Serial output.
+waiting for association in the main loop. A disconnected idle tap fails
+immediately. A ready tap starts capture and one HTTP/1.1 chunked
+`POST /v1/transcriptions` together, with `application/octet-stream` and no
+`Content-Length`. The streaming path allocates a long-lived 64-frame PSRAM ring:
+40,960 PCM bytes, or 1.28 seconds at 16 kHz, 16-bit mono. It allocates no full
+clip. The driver releases each 320-sample frame before main-task classification
+publishes it to the worker. A partially written frame remains immutable until
+all PCM bytes are accepted by the socket; the slot can then be reused without
+a backend acknowledgment. Queue exhaustion fails the whole session rather than
+block capture or transcribe audio with gaps.
 
-The direct nonblocking socket has a one-second connection limit, a five-second
-upload/response-progress idle limit, a 25-second first-response wait for local
-inference, and a shared 30-second request deadline. No redirects or automatic
-request retries are performed. HTTP headers are limited to 1,024 bytes total
-and 255 bytes per line; successful plain UTF-8 text is limited to 2,048 bytes,
-with explicit Content-Length and no transfer/content encoding. Socket close
-finishes before result publication. The installed SDK disables SO_LINGER;
-close can wait beyond the 30-second interaction deadline. An exceptional close
-failure keeps the worker and clip occupied while it retries cleanup.
+The worker checks incoming responses and disconnects during capture, including
+while writes stall. Its nonblocking socket has a one-second connection limit,
+a five-second stalled-I/O limit, and a 25-second first-response wait after the
+final chunk for local inference. There is no total request clock starting at
+capture admission. HTTP response headers are limited to 1,024 bytes total and
+255 bytes per line; successful plain UTF-8 text is limited to 2,048 bytes, with
+explicit Content-Length and no transfer/content encoding. No redirects or
+automatic request retries are performed.
+
+The main task keeps polling after a logical timeout. It stops and joins the
+microphone immediately on cancellation, but the ring remains borrowed until the
+worker acknowledges socket close and its final read. The SDK disables SO_LINGER;
+close can wait beyond the interaction deadline, and an exceptional close failure
+keeps the worker and ring occupied while cleanup retries. A new distinct tap is
+required after cleanup. Request IDs discard stale results; a late cancellation
+cannot print a second diagnostic or affect the next session. Explicit UTF-8 byte
+lengths preserve embedded NUL in Serial output.
 
 ### Verification
 
 A successful build checks compilation and linking. The
+[streaming plan](docs/plan/stream-audio-while-speaking.md) records native transport
+checks and pending device measurements. The
 [CoreS3 confirmation](docs/plan/speech-silence-stop.md#cores3-validation-follow-up)
 records the user-reported device result. The
 [transcription checklist](docs/plan/tap-to-transcribe.md#t3-connect-tap-recording-to-transcript-results)

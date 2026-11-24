@@ -13,22 +13,36 @@ RobotAudio::~RobotAudio()
 {
   releaseHardware();
   heap_caps_free(samples);
+  heap_caps_free(ring);
 }
 
 bool RobotAudio::startRecording()
 {
-  if (clipBorrowed || currentStatus == Status::RECORDING || currentStatus == Status::PLAYING)
+  return startCapture(false);
+}
+
+bool RobotAudio::startStreaming()
+{
+  return startCapture(true);
+}
+
+bool RobotAudio::startCapture(bool stream)
+{
+  if (clipBorrowed || streamBorrowed || currentStatus == Status::RECORDING || currentStatus == Status::PLAYING)
   {
     return false;
   }
 
   stop();
 
-  if (!samples)
+  streaming = stream;
+  int16_t*& buffer = stream ? ring : samples;
+  if (!buffer)
   {
-    samples = static_cast<int16_t*>(heap_caps_malloc(
-        kMaxSampleCount * sizeof(int16_t), MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT));
-    if (!samples)
+    buffer = static_cast<int16_t*>(heap_caps_malloc(
+        stream ? kStreamBytes : kMaxSampleCount * sizeof(int16_t),
+        MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT));
+    if (!buffer)
     {
       return fail(Error::BUFFER_ALLOCATION);
     }
@@ -39,6 +53,14 @@ bool RobotAudio::startRecording()
     return fail(Error::MICROPHONE_START);
   }
 
+  completedFrames.store(0, std::memory_order_relaxed);
+  classifiedFrames.store(0, std::memory_order_relaxed);
+  releasedFrames.store(0, std::memory_order_relaxed);
+  highWaterFrames.store(2, std::memory_order_relaxed);
+  queueExhausted.store(false, std::memory_order_relaxed);
+  processedFrames = 0;
+  nextQueuedFrame = 2;
+  streamPhase.store(StreamStatus::CAPTURING, std::memory_order_release);
   completedSamples.store(0, std::memory_order_relaxed);
   processedSamples = activitySamples = silentSamples = 0;
   refillFailed.store(false, std::memory_order_relaxed);
@@ -48,8 +70,8 @@ bool RobotAudio::startRecording()
   M5.Mic.setBufferReleaseCallback(this, bufferReleased);
   // Maintain two requests: the next one is already queued when a frame ends.
   // If startup is preempted for a whole frame, fail rather than accept a gap.
-  const bool admitted = M5.Mic.record(samples, kFrameSamples, kSampleRate, false)
-      && M5.Mic.record(samples + kFrameSamples, kFrameSamples, kSampleRate, false);
+  const bool admitted = M5.Mic.record(buffer, kFrameSamples, kSampleRate, false)
+      && M5.Mic.record(buffer + kFrameSamples, kFrameSamples, kSampleRate, false);
   captureStarting.store(false, std::memory_order_release);
   if (!admitted || refillFailed.load(std::memory_order_acquire))
   {
@@ -65,6 +87,41 @@ void RobotAudio::bufferReleased(void* context, void* data, size_t count)
   auto& audio = *static_cast<RobotAudio*>(context);
   if (audio.captureStopping.load(std::memory_order_acquire))
   {
+    return;
+  }
+
+  if (audio.streaming)
+  {
+    const uint32_t completed = audio.completedFrames.load(std::memory_order_relaxed);
+    if (data != audio.ring + (completed % kStreamFrames) * kFrameSamples
+        || count != kFrameSamples || audio.captureStarting.load(std::memory_order_acquire))
+    {
+      audio.refillFailed.store(true, std::memory_order_release);
+      return;
+    }
+    audio.completedFrameAt.store(millis(), std::memory_order_relaxed);
+    audio.completedFrames.store(completed + 1, std::memory_order_release);
+    const uint32_t occupied = audio.nextQueuedFrame
+        - audio.releasedFrames.load(std::memory_order_acquire);
+    if (occupied >= kStreamFrames)
+    {
+      audio.queueExhausted.store(true, std::memory_order_release);
+      return;
+    }
+    if (!M5.Mic.record(audio.ring + (audio.nextQueuedFrame % kStreamFrames) * kFrameSamples,
+            kFrameSamples, kSampleRate, false))
+    {
+      if (!audio.captureStopping.load(std::memory_order_acquire))
+      {
+        audio.refillFailed.store(true, std::memory_order_release);
+      }
+      return;
+    }
+    ++audio.nextQueuedFrame;
+    if (occupied + 1 > audio.highWaterFrames.load(std::memory_order_relaxed))
+    {
+      audio.highWaterFrames.store(occupied + 1, std::memory_order_relaxed);
+    }
     return;
   }
 
@@ -154,7 +211,7 @@ void RobotAudio::processRecording()
 
 bool RobotAudio::startPlayback()
 {
-  if (clipBorrowed || currentStatus != Status::RECORDED)
+  if (clipBorrowed || streamBorrowed || streaming || currentStatus != Status::RECORDED)
   {
     return false;
   }
@@ -198,7 +255,14 @@ void RobotAudio::update(uint32_t now)
 {
   if (currentStatus == Status::RECORDING)
   {
-    processRecording();
+    if (streaming)
+    {
+      processStreaming();
+    }
+    else
+    {
+      processRecording();
+    }
   }
   else if (currentStatus == Status::PLAYING)
   {
@@ -231,6 +295,11 @@ void RobotAudio::stop()
   }
 
   releaseHardware();
+  if (streamBorrowed)
+  {
+    currentStatus = Status::IDLE;
+    return; // Socket/reader still owns ring storage; admission stays busy.
+  }
   currentStatus = Status::IDLE;
   currentError = Error::NONE;
   drainingPlayback = false;
@@ -241,6 +310,7 @@ void RobotAudio::releaseHardware()
 {
   // Do not use Speaker.stop(): it only queues a marker and does not join.
   // Keep samples alive and unchanged until both end() calls return.
+  streamPhase.store(StreamStatus::CANCELLED, std::memory_order_release);
   captureStopping.store(true, std::memory_order_release);
   M5.Mic.end();
   M5.Mic.setBufferReleaseCallback(nullptr, nullptr);
@@ -259,7 +329,7 @@ bool RobotAudio::fail(Error error)
 
 bool RobotAudio::borrowCompletedClip(Clip& clip)
 {
-  if (clipBorrowed || currentStatus != Status::RECORDED)
+  if (clipBorrowed || streaming || currentStatus != Status::RECORDED)
   {
     return false;
   }
@@ -273,4 +343,116 @@ bool RobotAudio::borrowCompletedClip(Clip& clip)
 void RobotAudio::releaseCompletedClip()
 {
   clipBorrowed = false;
+}
+
+uint32_t RobotAudio::completedFrameCount() const
+{
+  return streaming ? completedFrames.load(std::memory_order_acquire)
+      : completedSamples.load(std::memory_order_acquire) / kFrameSamples;
+}
+
+bool RobotAudio::borrowStream()
+{
+  if (!streaming || streamBorrowed || currentStatus != Status::RECORDING)
+  {
+    return false;
+  }
+  streamBorrowed = true;
+  return true;
+}
+
+void RobotAudio::releaseStream()
+{
+  streamBorrowed = false;
+}
+
+const int16_t* RobotAudio::streamFrame() const
+{
+  const uint32_t released = releasedFrames.load(std::memory_order_relaxed);
+  if (released == classifiedFrames.load(std::memory_order_acquire))
+  {
+    return nullptr;
+  }
+  return ring + (released % kStreamFrames) * kFrameSamples;
+}
+
+void RobotAudio::releaseStreamFrame()
+{
+  releasedFrames.fetch_add(1, std::memory_order_release);
+}
+
+bool RobotAudio::streamDrained() const
+{
+  return releasedFrames.load(std::memory_order_relaxed)
+      == classifiedFrames.load(std::memory_order_acquire);
+}
+
+void RobotAudio::processStreaming()
+{
+  if (!M5.Mic.isRunning())
+  {
+    fail(Error::MICROPHONE_STOPPED);
+    return;
+  }
+  if (queueExhausted.load(std::memory_order_acquire))
+  {
+    fail(Error::QUEUE_EXHAUSTED);
+    return;
+  }
+  if (refillFailed.load(std::memory_order_acquire))
+  {
+    fail(Error::RECORD_REQUEST);
+    return;
+  }
+
+  const uint32_t available = completedFrames.load(std::memory_order_acquire);
+  while (processedFrames != available)
+  {
+    const int16_t* frame = ring + (processedFrames % kStreamFrames) * kFrameSamples;
+    uint32_t energy = 0;
+    for (size_t i = 0; i < kFrameSamples; ++i)
+    {
+      const int32_t value = frame[i];
+      energy += value < 0 ? -value : value;
+    }
+    ++processedFrames;
+    // Only the initial quiet window needs the cumulative sample count.
+    if (processedSamples < kInitialSilenceSamples)
+    {
+      processedSamples += kFrameSamples;
+    }
+    if (energy >= kActivityThreshold * kFrameSamples)
+    {
+      if (activitySamples < kMinimumActivitySamples)
+      {
+        activitySamples += kFrameSamples;
+      }
+      silentSamples = 0;
+    }
+    else
+    {
+      silentSamples += kFrameSamples;
+    }
+    // The classifier has finished reading before the worker can see this slot.
+    classifiedFrames.store(processedFrames, std::memory_order_release);
+    const bool initialSilence = activitySamples == 0 && processedSamples >= kInitialSilenceSamples;
+    const bool hangover = activitySamples != 0 && silentSamples >= kHangoverSamples;
+    if (initialSilence || hangover)
+    {
+      captureStopping.store(true, std::memory_order_release);
+      M5.Mic.end(); // Join before publishing a valid, immutable final boundary.
+      M5.Mic.setBufferReleaseCallback(nullptr, nullptr);
+      if (queueExhausted.load(std::memory_order_acquire)
+          || refillFailed.load(std::memory_order_acquire))
+      {
+        fail(queueExhausted.load() ? Error::QUEUE_EXHAUSTED : Error::RECORD_REQUEST);
+        return;
+      }
+      const bool valid = activitySamples >= kMinimumActivitySamples;
+      currentStatus = valid ? Status::RECORDED : Status::NO_SPEECH;
+      streamPhase.store(valid ? StreamStatus::FINISHED : StreamStatus::CANCELLED,
+          std::memory_order_release);
+      return;
+    }
+  }
 }

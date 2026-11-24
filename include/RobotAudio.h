@@ -5,6 +5,7 @@
 #include <cstdint>
 
 class RobotTranscription;
+class TranscriptionUpload;
 
 // One long-lived instance exclusively owns M5.Mic and M5.Speaker.
 class RobotAudio
@@ -27,6 +28,7 @@ public:
     BUFFER_ALLOCATION,
     MICROPHONE_START,
     RECORD_REQUEST,
+    QUEUE_EXHAUSTED,
     MICROPHONE_STOPPED,
     SPEAKER_START,
     PLAY_REQUEST,
@@ -48,6 +50,21 @@ public:
     size_t sampleCount = 0;
   };
 
+  static constexpr size_t kStreamFrames = 64;
+  static constexpr size_t kStreamBytes = kStreamFrames * kFrameSamples * sizeof(int16_t);
+  enum class StreamStatus
+  {
+    CAPTURING,
+    FINISHED,
+    CANCELLED
+  };
+
+  // Streaming owns only a reusable 40 KiB ring; record/replay remains bounded.
+  bool startStreaming();
+  uint32_t completedFrameCount() const;
+  uint32_t lastCompletedFrameAt() const { return completedFrameAt.load(std::memory_order_relaxed); }
+  size_t streamHighWaterFrames() const { return highWaterFrames.load(); }
+
   RobotAudio() = default;
   ~RobotAudio();
   RobotAudio(const RobotAudio &) = delete;
@@ -61,14 +78,39 @@ public:
   bool startPlayback();
   void update(uint32_t now);
   // Cancels either operation, invalidates the clip, and returns to IDLE.
-  // While transcription borrows a completed clip, stop() leaves it intact.
+  // A borrowed clip stays intact. A borrowed stream stops its driver immediately
+  // but keeps its ring reserved until the transport acknowledges socket cleanup.
   // M5Unified end() synchronously releases driver ownership and may wait.
   void stop();
   Status status() const { return currentStatus; }
   Error error() const { return currentError; }
 
 private:
+  friend class RobotAudioTestAccess;
   friend class RobotTranscription;
+  friend class TranscriptionUpload;
+
+  bool borrowStream();
+  void releaseStream();
+  const int16_t* streamFrame() const;
+  void releaseStreamFrame();
+  StreamStatus streamStatus() const { return streamPhase.load(std::memory_order_acquire); }
+  bool streamDrained() const;
+  bool startCapture(bool stream);
+  void processStreaming();
+
+  int16_t* ring = nullptr;
+  bool streaming = false;
+  bool streamBorrowed = false; // Main-task admission/cleanup only.
+  std::atomic<StreamStatus> streamPhase{StreamStatus::CANCELLED};
+  std::atomic<uint32_t> completedFrameAt{0};
+  std::atomic<uint32_t> completedFrames{0}; // Driver -> main.
+  std::atomic<uint32_t> classifiedFrames{0}; // Main -> worker.
+  std::atomic<uint32_t> releasedFrames{0}; // Worker -> driver.
+  std::atomic<size_t> highWaterFrames{0};
+  std::atomic<bool> queueExhausted{false};
+  uint32_t nextQueuedFrame = 0; // Driver only after admission.
+  uint32_t processedFrames = 0; // Main only.
 
   // Main-task only. Only the transport may release after worker acknowledgment.
   bool borrowCompletedClip(Clip &clip);

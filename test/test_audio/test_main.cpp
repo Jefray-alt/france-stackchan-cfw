@@ -4,7 +4,7 @@
 #include "RobotAudio.h"
 
 // Exercise the same private borrow/release boundary as the real transport.
-class RobotTranscription
+class RobotAudioTestAccess
 {
 public:
   static bool borrow(RobotAudio& audio, RobotAudio::Clip& clip)
@@ -50,11 +50,11 @@ void test_capture_queues_continuously_and_keeps_speech_after_two_seconds()
   assertStatus(audio, RobotAudio::Status::RECORDED);
   TEST_ASSERT_FALSE(M5.Mic.running);
   RobotAudio::Clip clip;
-  TEST_ASSERT_TRUE(RobotTranscription::borrow(audio, clip));
+  TEST_ASSERT_TRUE(RobotAudioTestAccess::borrow(audio, clip));
   TEST_ASSERT_EQUAL_UINT(128000, clip.sampleCount);
   TEST_ASSERT_EQUAL_INT16(1000, clip.samples[47999]);
   TEST_ASSERT_EQUAL_INT16(0, clip.samples[128000 - 1]);
-  RobotTranscription::release(audio);
+  RobotAudioTestAccess::release(audio);
 }
 
 void test_short_pause_resets_hangover_and_minimum_activity_is_cumulative()
@@ -82,16 +82,16 @@ void test_continuous_activity_hits_exact_cap_and_borrow_blocks_reuse()
   assertStatus(audio, RobotAudio::Status::RECORDED);
   TEST_ASSERT_TRUE(M5.Mic.queued.empty());
   RobotAudio::Clip clip;
-  TEST_ASSERT_TRUE(RobotTranscription::borrow(audio, clip));
+  TEST_ASSERT_TRUE(RobotAudioTestAccess::borrow(audio, clip));
   TEST_ASSERT_EQUAL_UINT(160000, clip.sampleCount);
   TEST_ASSERT_FALSE(audio.startRecording());
   TEST_ASSERT_FALSE(audio.startPlayback());
   audio.stop();
   assertStatus(audio, RobotAudio::Status::RECORDED);
   RobotAudio::Clip other;
-  TEST_ASSERT_FALSE(RobotTranscription::borrow(audio, other));
+  TEST_ASSERT_FALSE(RobotAudioTestAccess::borrow(audio, other));
   TEST_ASSERT_EQUAL_INT16(1000, clip.samples[159999]);
-  RobotTranscription::release(audio);
+  RobotAudioTestAccess::release(audio);
   TEST_ASSERT_TRUE(audio.startRecording());
   TEST_ASSERT_EQUAL_UINT(1, fakeHeap().allocations);
   TEST_ASSERT_EQUAL_UINT(320000, fakeHeap().bytes);
@@ -103,11 +103,11 @@ void test_continuous_activity_hits_exact_cap_and_borrow_blocks_reuse()
   assertStatus(audio, RobotAudio::Status::RECORDING);
   frames(audio, 1, 0); // The ten-second cap wins after 4.98 seconds quiet.
   assertStatus(audio, RobotAudio::Status::RECORDED);
-  TEST_ASSERT_TRUE(RobotTranscription::borrow(audio, clip));
+  TEST_ASSERT_TRUE(RobotAudioTestAccess::borrow(audio, clip));
   TEST_ASSERT_EQUAL_UINT(160000, clip.sampleCount);
   TEST_ASSERT_EQUAL_INT16(100, clip.samples[149 * 320]);
   TEST_ASSERT_EQUAL_INT16(0, clip.samples[159999]);
-  RobotTranscription::release(audio);
+  RobotAudioTestAccess::release(audio);
 }
 
 void test_refill_failure_is_capture_error_and_retry_works()
@@ -120,7 +120,7 @@ void test_refill_failure_is_capture_error_and_retry_works()
   assertStatus(audio, RobotAudio::Status::FAILED);
   TEST_ASSERT_FALSE(M5.Mic.running);
   RobotAudio::Clip clip;
-  TEST_ASSERT_FALSE(RobotTranscription::borrow(audio, clip));
+  TEST_ASSERT_FALSE(RobotAudioTestAccess::borrow(audio, clip));
   M5.Mic.failRecord = false;
   TEST_ASSERT_TRUE(audio.startRecording());
   frames(audio, 500, 1000);
@@ -136,7 +136,7 @@ void test_initial_silence_boundary_late_onset_and_quiet_noise()
   frames(audio, 1, 99);
   assertStatus(audio, RobotAudio::Status::NO_SPEECH);
   RobotAudio::Clip clip;
-  TEST_ASSERT_FALSE(RobotTranscription::borrow(audio, clip));
+  TEST_ASSERT_FALSE(RobotAudioTestAccess::borrow(audio, clip));
   TEST_ASSERT_FALSE(audio.startPlayback());
 
   TEST_ASSERT_TRUE(audio.startRecording());
@@ -144,11 +144,11 @@ void test_initial_silence_boundary_late_onset_and_quiet_noise()
   frames(audio, 6, 100); // Onset on the last allowed frame, exactly 120 ms.
   frames(audio, 250, 0);
   assertStatus(audio, RobotAudio::Status::RECORDED);
-  TEST_ASSERT_TRUE(RobotTranscription::borrow(audio, clip));
+  TEST_ASSERT_TRUE(RobotAudioTestAccess::borrow(audio, clip));
   TEST_ASSERT_EQUAL_UINT(405 * 320, clip.sampleCount);
   TEST_ASSERT_EQUAL_INT16(0, clip.samples[0]);
   TEST_ASSERT_EQUAL_INT16(100, clip.samples[149 * 320]);
-  RobotTranscription::release(audio);
+  RobotAudioTestAccess::release(audio);
 
   TEST_ASSERT_TRUE(audio.startRecording());
   frames(audio, 5, -32768); // A 100 ms burst is insufficient activity.
@@ -156,7 +156,7 @@ void test_initial_silence_boundary_late_onset_and_quiet_noise()
   assertStatus(audio, RobotAudio::Status::RECORDING);
   frames(audio, 1, 0);
   assertStatus(audio, RobotAudio::Status::NO_SPEECH);
-  TEST_ASSERT_FALSE(RobotTranscription::borrow(audio, clip));
+  TEST_ASSERT_FALSE(RobotAudioTestAccess::borrow(audio, clip));
   TEST_ASSERT_TRUE(audio.startRecording());
 }
 
@@ -170,7 +170,7 @@ void test_slow_updates_discard_tail_and_join_before_clip_is_visible()
   bool joined = false;
   M5.Mic.onEnd = [&]() {
     RobotAudio::Clip unavailable;
-    TEST_ASSERT_FALSE(RobotTranscription::borrow(audio, unavailable));
+    TEST_ASSERT_FALSE(RobotAudioTestAccess::borrow(audio, unavailable));
     joined = true;
   };
   audio.update(9000);
@@ -178,10 +178,10 @@ void test_slow_updates_discard_tail_and_join_before_clip_is_visible()
   TEST_ASSERT_TRUE(joined);
   assertStatus(audio, RobotAudio::Status::RECORDED);
   RobotAudio::Clip clip;
-  TEST_ASSERT_TRUE(RobotTranscription::borrow(audio, clip));
+  TEST_ASSERT_TRUE(RobotAudioTestAccess::borrow(audio, clip));
   TEST_ASSERT_EQUAL_UINT(256 * 320, clip.sampleCount);
   TEST_ASSERT_EQUAL_INT16(0, clip.samples[clip.sampleCount - 1]);
-  RobotTranscription::release(audio);
+  RobotAudioTestAccess::release(audio);
 }
 
 void test_empty_driver_queue_waits_for_delayed_final_release_callback()
@@ -194,13 +194,13 @@ void test_empty_driver_queue_waits_for_delayed_final_release_callback()
   audio.update(10000);
   assertStatus(audio, RobotAudio::Status::RECORDING);
   RobotAudio::Clip clip;
-  TEST_ASSERT_FALSE(RobotTranscription::borrow(audio, clip));
+  TEST_ASSERT_FALSE(RobotAudioTestAccess::borrow(audio, clip));
   M5.Mic.callback(M5.Mic.context, last.data, last.count);
   audio.update(10001);
   assertStatus(audio, RobotAudio::Status::RECORDED);
-  TEST_ASSERT_TRUE(RobotTranscription::borrow(audio, clip));
+  TEST_ASSERT_TRUE(RobotAudioTestAccess::borrow(audio, clip));
   TEST_ASSERT_EQUAL_UINT(160000, clip.sampleCount);
-  RobotTranscription::release(audio);
+  RobotAudioTestAccess::release(audio);
 }
 
 void test_allocation_and_driver_failures_release_ownership_for_retry()

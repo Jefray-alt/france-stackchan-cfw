@@ -15,6 +15,7 @@ public:
   enum class Error
   {
     NONE,
+    CANCELLED,
     NOT_CONFIGURED,
     INVALID_CONFIGURATION,
     WORKER_UNAVAILABLE,
@@ -50,8 +51,6 @@ public:
     char text[TranscriptionProtocol::kMaxTranscriptBytes + 1] = {};
   };
 
-  static constexpr uint32_t kDeadlineMs = 30000;
-
   RobotTranscription() = default;
   RobotTranscription(const RobotTranscription&) = delete;
   RobotTranscription& operator=(const RobotTranscription&) = delete;
@@ -60,9 +59,11 @@ public:
 
   Error begin();
   Readiness readiness() const;
-  Error submit(RobotAudio& audio, uint32_t requestId);
+  Error startStream(RobotAudio& audio, uint32_t requestId);
+  // Errors become visible before a potentially delayed socket-close acknowledgment.
+  Error activeError() const;
   // Release is acknowledged only here, after socket close and the last read of
-  // the clip. Poll even after a logical interaction timeout; discard stale IDs.
+  // the ring. Poll even after a logical interaction timeout; discard stale IDs.
   // No retry or new recording is allowed while hasPendingRequest() is true.
   bool poll(Result& result);
   bool hasPendingRequest() const { return borrowedAudio != nullptr; }

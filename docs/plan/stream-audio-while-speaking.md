@@ -1,6 +1,7 @@
 # Stream microphone audio while speaking
 
-**Status:** Approved on 2026-11-24. T1 passed independent review; T2 is pending.
+**Status:** Approved on 2026-11-24. T1 and T2 passed independent review and are
+delivered as separate task commits. Physical streaming validation is pending.
 
 **Outcome:** After a tap, the CoreS3 sends microphone audio to the local backend
 while the user speaks. The streaming firmware has no fixed recording duration.
@@ -14,6 +15,9 @@ The backend returns one final transcript after capture ends.
   `france-stackchan-cfw-stream-audio` worktree. This plan was moved there.
 - The user approved the plan and asked to start implementation on 2026-11-24.
   They requested a new branch and worktree and asked that the plan live there.
+  Approval record: “I think this alreadt looks good we can start with the
+  implementation, create a new branch and worktree and make sure to bring the
+  current plan file to it and don't leave it in the main branch”.
 - The current firmware collects 20 ms microphone frames in a 320,000-byte PSRAM
   clip and starts an HTTP upload after silence or the ten-second cap. The local
   backend receives the whole body before invoking Whisper. See the
@@ -160,8 +164,8 @@ changes outside the four owned files were needed.
   checks successfully, and additional malformed chunk/trailer probes returned
   400 with no inference. Their real Whisper smoke observed first PCM at 7 ms,
   capture end at 10,566 ms and inference at 10,569 ms; HTTP 200 completed at
-  10,958 ms. Their separate 60-second inference took 1,312 ms. The task is ready
-  for its authorized `feat(backend): accept streaming pcm uploads` commit.
+  10,958 ms. Their separate 60-second inference took 1,312 ms. Committed as
+  `158ab35 feat(backend): accept streaming pcm uploads`.
 
 ### T2. Stream CoreS3 audio during tap-to-talk
 
@@ -193,13 +197,157 @@ minimum free internal heap, and PSRAM use during repeated streams.
 
 **Proposed commit.** `feat(audio): stream cores3 microphone frames during capture`
 
-**Status and evidence.** Pending.
+**Status and evidence.** Implemented on 2026-11-24 and independently reviewed
+with **PASS** in round **2 of 3**, after correcting two findings from round 1.
+The configured reviewer used separately selected `gpt-6.2-astra` with `xhigh`
+reasoning for the concurrent ownership and finalization review. This is
+implementation/host evidence; physical streaming capability is still
+unverified. The implementer owns the atomic task commit; the developer did not
+stage, commit, push, delegate or flash.
+
+- T2 baseline: clean `feat/stream-audio-while-speaking` at
+  `158ab356209d8853850235704ead8fa37632ed78` in
+  `/Users/france/apps/stackchan/france-stackchan-cfw-stream-audio`. T1 dependency
+  is committed as `158ab35 feat(backend): accept streaming pcm uploads`.
+  The approved outcome, backend limits, speech thresholds and standalone
+  record/replay API are preserved. Ownership is the four audio/controller/
+  transport/state components, new `TranscriptionUpload` helper, their native
+  fixtures/tests, native source-filter integration, README, test/README and
+  this evidence. No backend, renderer, main loop or workflow file changed.
+- The configured developer role leaves model/effort unpinned; the selected
+  runtime is `gpt-6.1-sol` with `xhigh` reasoning. Rationale: cross-task buffer
+  lifetimes, callback ownership, incremental partial writes and timing cleanup.
+  Earlier context is T1's final-only chunked contract and the approved
+  three-second quiet / 120 ms activity / five-second pause behavior.
+- The streaming path allocates a reusable 64-frame / 40,960-byte PSRAM ring,
+  never a full clip. Driver-completed, main-classified and worker-released
+  watermarks preserve order and immutable ownership through wrap. The driver
+  callback does no classification or socket work. Its release timestamp drives
+  the one-second progress watchdog; delayed main observation does not reset it
+  to a newer time. Streaming counters have no sample/elapsed duration cap.
+- One worker request starts with capture. `TranscriptionUpload` is the actual
+  incremental HTTP sender shared with native tests through a small nonblocking
+  I/O interface. It drains multiple immediately available segments per poll,
+  retains partial-write offsets, and releases each slot after the last PCM
+  byte is accepted, before its HTTP suffix or any response acknowledgment.
+  It checks incoming rejection/EOF during capture and stalled writes. The
+  worker keeps its one-second connect limit, five-second stalled-I/O limit and
+  25-second first-response wait after the terminal chunk. The independent
+  30-second controller deadline starts at valid capture completion.
+- The final chunk is possible only after microphone join, a valid classification
+  boundary and all accepted PCM frames drain. Extra captured/unclassified tail
+  is excluded. Quiet, brief noise, failed capture, logical abort and queue
+  exhaustion cancel by closing without that chunk. Distinct CANCELLED facts
+  prevent a fast or late quiet-upload acknowledgment from replacing no-speech
+  with an error. Genuine matching failures take precedence even alongside
+  RECORDED/NO_SPEECH. A fast successful final result is cached through THINKING.
+  Unexpected success before request finalization fails protocol validation.
+- Error notification is published before socket destruction, so even an
+  exceptional close delay can stop main-task capture and report once. The ring
+  remains borrowed until poll acknowledges the closed socket and last worker
+  read; a logical timeout grants no early admission. No automatic retry is used.
+- RED, before production edits:
+  `/Users/france/.platformio/penv/bin/pio test -e native -f test_controller`
+  exited **1**. New behavioral test
+  `test_backend_rejection_during_capture_stops_listening_once` failed because
+  the old LISTENING state ignored a matching worker failure; the prior 19 cases
+  passed. PlatformIO labeled the failing Unity executable ERRORED after its
+  failure exit. Later fixture iterations exposed a stale constructor timestamp
+  in repeated simulated sessions; the fixture now starts each upload clock
+  at its actual simulated session time.
+- Independent review identified two transport edge cases: a status line begun
+  before request finalization could be recognized as successful afterward, and
+  readable data could reset a response deadline before it was checked. The
+  correction records whether any response bytes were read before the terminal
+  chunk; a later HTTP 200 then fails protocol validation regardless of when its
+  status line is recognized. Response expiry is checked before reading, so
+  elapsed deadlines win over available data or a complete transcript. These
+  changes are confined to the upload helper, focused regressions and evidence;
+  acceptance criteria, ownership, baseline and backend dependency are unchanged.
+- Correction RED before helper edits:
+  `/Users/france/.platformio/penv/bin/pio test -e native -f test_stream`
+  exited **1**, with the three new regressions returning unexpected success
+  and all nine existing stream cases passing. Log:
+  `/tmp/stackchan-t2-corrections-red.log`. The final protocol regression splits
+  `HTTP/1.1 200 OK` from its CRLF/headers/body across the last capture frame and
+  terminal chunk, isolating protocol detection from the separate idle timeout.
+  Readable-data regressions fail at exactly 25000/5000 ms and succeed at
+  24999/4999 ms, with ordinary timestamps and unsigned rollover. Final GREEN
+  below includes all three regression cases; independent round 2 passed.
+- GREEN:
+  `/Users/france/.platformio/penv/bin/pio test -e native` exited **0**,
+  **49/49** cases passed: 22 controller, eight bounded audio, seven response
+  parser and 12 streaming cases. The shared production ring/sender test
+  captures 70 seconds of simulated speech plus five seconds of exact silence
+  tail, sends more than the backend's 60-second cap to a draining test consumer,
+  checks byte-for-byte little-endian PCM through wrap and one 40,960-byte
+  allocation, and proves the firmware itself has no duration/length cap.
+  Further cases cover delayed driver handoff, partial PCM retention/immediate
+  slot requeue before suffix/response, exact joined tail, quiet/noise/minimum
+  cumulative activity, queue exhaustion, allocation/start/refill/stopped-driver
+  failure, fragmented live 413/EOF/write error, premature 200, logical abort,
+  repeated reuse, 999/1000 ms progress boundaries and rollover, 70-second
+  listening, actual frame time, 29999/30000 ms result boundaries, resettable
+  five-second I/O stalls, 25-second first response, partial-response stalls,
+  failure/finalization races, cancellation acknowledgment races, stale IDs,
+  sleep/wake and fresh taps after modeled cleanup.
+- `/Users/france/.nvm/versions/node/v24.22.3/bin/node --test backend/server.test.mjs`
+  exited **0**, **44/44** cases passed with unchanged backend source and limits.
+  Latest suite log: `/tmp/stackchan-t2-backend.log`.
+  T1 already records paced local Whisper and separate 60-second inference;
+  those model smoke checks were not repeated for this firmware-only task.
+- `/Users/france/.platformio/penv/bin/pio run -e m5stack-cores3` exited **0**
+  with `include/LocalConfig.h` absent: RAM **34,772 / 327,680 bytes**, flash
+  **610,131 / 6,553,600 bytes**. A second configured build ran via
+  `python3 /tmp/stackchan-t2-configured-build.py`, exited **0**, RAM
+  **54,700 bytes**, flash **1,101,643 bytes**. The script exclusively creates
+  the absent ignored config using `Path.open('x')`, dummy SSID/password and
+  numeric `http://127.0.0.1:3000`, runs the same absolute pio build with this
+  worktree as `cwd`, and removes the file in `finally`. It refuses an existing
+  file without reading or overwriting it. Final absence was checked explicitly.
+  The unconfigured link can dead-strip worker code; the configured link verifies
+  the real socket/RTOS adapter is included. Resolved build dependencies:
+  Espressif32 **8.0.0**, Arduino ESP32 **3.3.12**, M5Unified **0.3.0**,
+  M5GFX **0.3.0**. Existing M5GFX unused-variable warnings remain; no project
+  compilation warnings were observed. These size figures are static linker
+  output, not runtime free-heap/PSRAM measurements.
+- `git diff --check` and `python3 /tmp/stackchan-t2-doc-check.py` exited **0**.
+  The latter checks local Markdown targets and full-content whitespace,
+  including untracked files. Documentation was
+  validated by command/path/contract consistency; a RED test adds no useful
+  evidence for prose. The complete tracked plus untracked binary diff and
+  SHA-256 manifest are frozen at `/tmp/stackchan-t2-candidate.diff` and
+  `/tmp/stackchan-t2-candidate.json`; the handoff reports their exact hashes.
+- Native tests execute the production ring and HTTP exchange helper, plus the
+  production state decisions. Their socket acceptance/close acknowledgment and
+  microphone completion are controlled fixtures. They do not execute the real
+  connect/select/SDK-close calls, exceptional close retries, Wi-Fi association,
+  RobotController Serial calls or FreeRTOS scheduling. Configured compile/link
+  and source inspection cover adapter integration; real concurrency, DMA/I2S
+  continuity and timing still need hardware. No full RTOS simulation was added.
+- **Hardware unavailable / no upload authorized.** Pending on the intended CoreS3:
+  first backend PCM timestamp versus capture end; speech past eleven seconds
+  then the full silence tail; live server rejection while listening; repeated
+  streams; brief stalls and stalls beyond ring capacity; Wi-Fi loss/recovery;
+  blink and sleep/wake; queue high-water; minimum free internal heap and PSRAM
+  use. No physical behavior or metrics are claimed from these builds.
+- Independent review round 2 found no remaining actionable issues. The reviewer
+  reran all 49 native tests, all 44 backend tests, the unconfigured firmware
+  build, full-file hashes, whitespace, local links and Markdown anchors. Their
+  separate 16-case production-sender probe rejected successful responses begun
+  during capture or a partial terminal write, enforced the exact 25,000 ms and
+  5,000 ms response boundaries, and accepted the one-millisecond-inside controls.
+  The configured build log confirmed the real adapter links. The reviewed
+  implementation is delivered in
+  `feat(audio): stream cores3 microphone frames during capture`.
+
 
 ## Review and validation
 
 - Plan reviewed against the current capture path, controller and backend contract.
   T1 used the configured developer and independent reviewer; review round 1
-  passed. T2 will use a fresh pair after the T1 commit.
+  passed. T2 used a fresh developer/reviewer pair after T1 commit `158ab35`,
+  reused the pair for corrections, and passed round 2 of the three-round budget.
 - Native fixtures and the firmware build cover decisions and integration checks.
   Device measurement is needed for real microphone continuity, network timing,
   queue behavior under Wi-Fi stalls, and memory headroom. Flashing via
@@ -208,4 +356,7 @@ minimum free internal heap, and PSRAM use during repeated streams.
 ## Handoff
 
 - Implementation and task commits are authorized by the user's approval.
-  T1 checks and independent review passed. T2 and hardware validation are pending.
+  T1 is committed as `158ab35` after checks and independent review. T2 is
+  delivered as `feat(audio): stream cores3 microphone frames during capture`
+  after its checks and independent round 2 PASS. Physical streaming validation
+  remains pending. Neither task was pushed or flashed.
